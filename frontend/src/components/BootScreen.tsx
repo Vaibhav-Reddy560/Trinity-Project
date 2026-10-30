@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { CASES, TARGET } from '@/lib/scope'
 import { cn } from '@/lib/utils'
-import { Wordmark } from './Logo'
+import { Lockup } from './Logo'
 
 const C = 150
 const layer = (i: number) => ({ '--i': i }) as CSSProperties
@@ -97,7 +97,7 @@ export function BootScreen({ ready, onDone }: { ready: boolean; onDone: () => vo
         <ScannerRings />
 
         <div className="mt-8 flex h-[4.5rem] items-center justify-center">
-          {showMark && <Wordmark intro className="text-[clamp(2.6rem,9vw,3.6rem)]" />}
+          {showMark && <Lockup intro className="gap-3" markClass="h-[clamp(2rem,7vw,2.8rem)]" textClass="text-[clamp(2.6rem,9vw,3.6rem)]" />}
         </div>
         <p className="boot-rise mt-2 font-heading text-xs tracking-[0.2em] text-bone/80 uppercase" style={{ animationDelay: '1.2s' }}>
           Find the flaw. Prove the fix.

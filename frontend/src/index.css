@@ -175,6 +175,32 @@
     color: var(--color-bone);
     text-shadow: var(--glow-signal);
   }
+  /* P mark: same red glow as the sidebar wordmark; pixel blocks glitch with the text on hover. */
+  .logo-mark {
+    filter: drop-shadow(0 0 2px rgb(225 6 0 / 0.65)) drop-shadow(0 0 8px rgb(225 6 0 / 0.35));
+  }
+  .logo-px {
+    transform-box: fill-box;
+  }
+  /* Display sizes match the large wordmark's glow (var(--glow-signal)). */
+  .logo-mark-lg {
+    filter: drop-shadow(0 0 5px rgb(225 6 0 / 0.75)) drop-shadow(0 0 20px rgb(225 6 0 / 0.4));
+  }
+  /* Intro: the P glitches in with the wordmark while its pixel blocks fly in and snap on. */
+  .mark-intro {
+    @media (prefers-reduced-motion: no-preference) {
+      animation: glitch-in 1.1s steps(1, end) both;
+      & .logo-px {
+        animation: px-assemble 850ms steps(7, end) 150ms both;
+      }
+    }
+  }
+  :where(a, button):is(:hover, :focus-visible) .logo-px {
+    @media (prefers-reduced-motion: no-preference) {
+      animation: px-glitch 0.9s steps(1, end) infinite;
+    }
+  }
+
   /* Sidebar size: brighter white core so it doesn't look dull next to the hero. */
   .wordmark-bright {
     color: #f6efeb;
@@ -498,6 +524,18 @@
 @keyframes glitch-fade {
   0%, 90% { opacity: 0.85; }
   100% { opacity: 0; }
+}
+@keyframes px-assemble {
+  from { translate: -220px -120px; opacity: 0; }
+  30% { opacity: 1; }
+  to { translate: 0 0; opacity: 1; }
+}
+@keyframes px-glitch {
+  0% { translate: 0 0; }
+  20% { translate: -70px 0; }
+  40% { translate: 50px -20px; }
+  60% { translate: 0 0; }
+  80% { translate: -35px 0; }
 }
 @keyframes layer-explode {
   0%, 8% { transform: none; }

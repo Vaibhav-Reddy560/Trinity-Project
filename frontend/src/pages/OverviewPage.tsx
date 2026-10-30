@@ -1,6 +1,6 @@
 import { ArrowRight, Bug, ChevronRight, FileText, Play, ScanSearch } from 'lucide-react'
 import { Highlight, headline, levelIcon, levelTone } from '@/components/EvidenceLog'
-import { Wordmark } from '@/components/Logo'
+import { Lockup } from '@/components/Logo'
 import { Panel } from '@/components/Panel'
 import { SeverityTag, VerdictPill } from '@/components/Pills'
 import { PipelineRing } from '@/components/PipelineRing'
@@ -35,9 +35,17 @@ export function OverviewPage({ vulns, pending, onRun }: {
     <>
       <section className="panel relative mb-6 overflow-hidden" aria-labelledby="hero-title">
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_55%_90%_at_0%_40%,rgb(225_6_0/0.2),transparent_70%)]" />
-        <svg aria-hidden viewBox="0 0 400 400" className="pointer-events-none absolute top-1/2 -right-28 hidden h-[150%] -translate-y-1/2 opacity-35 md:block">
+        {/* Rings are centred on the target card (20rem column + 2.5rem padding) and sized so
+            their outer edge stops short of the title and copy. Shown only when the card sits
+            beside the text (xl); when it stacks underneath there is no free space for them. */}
+        <svg aria-hidden viewBox="0 0 400 400"
+          className="pointer-events-none absolute top-1/2 right-[calc(12.5rem-13rem)] hidden size-[26rem] -translate-y-1/2 opacity-60 xl:block">
           {[190, 160, 130, 100, 70].map((r, i) => (
-            <circle key={r} cx="200" cy="200" r={r} fill="none" stroke={i % 2 ? 'var(--color-blood-800)' : 'var(--color-blood-600)'} strokeWidth={i === 0 ? 2 : 1} strokeDasharray={i === 1 ? '4 6' : undefined} />
+            <circle key={r} cx="200" cy="200" r={r} fill="none"
+              stroke={i % 2 ? 'var(--color-blood-800)' : 'var(--color-blood-600)'}
+              strokeWidth={i === 0 ? 2 : 1}
+              strokeDasharray={i === 1 ? '4 6' : i === 3 ? '24 10 4 10' : undefined}
+              className={i === 1 ? 'spin-slow' : undefined} />
           ))}
           <path d="M200 0v40M200 360v40M0 200h40M360 200h40" stroke="var(--color-signal)" strokeWidth="2" />
         </svg>
@@ -45,7 +53,7 @@ export function OverviewPage({ vulns, pending, onRun }: {
         <div className="relative grid gap-8 px-6 py-8 md:px-10 md:py-10 xl:grid-cols-[minmax(0,1fr)_20rem] xl:items-end">
           <div className="min-w-0">
             <h1 id="hero-title" aria-label="PatchProof" className="tracking-normal normal-case">
-              <Wordmark intro className="text-[clamp(3.75rem,10vw,8.5rem)]" />
+              <Lockup intro className="gap-[clamp(0.75rem,1.6vw,1.5rem)]" markClass="h-[clamp(2.9rem,7.8vw,6.6rem)]" textClass="text-[clamp(3.75rem,10vw,8.5rem)]" />
             </h1>
             <p className="mt-5 font-heading text-base tracking-[0.14em] text-bone uppercase md:text-xl">Find the flaw. Prove the fix.</p>
             <p className="mt-4 max-w-[62ch] text-base leading-relaxed text-bone/80">

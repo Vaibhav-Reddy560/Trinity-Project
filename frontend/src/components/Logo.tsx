@@ -3,14 +3,17 @@ import { cn } from '@/lib/utils'
 
 // The ONLY file where the Vintage Glitch font may be used (PROJECT_CONTEXT.md §9).
 
-export function LogoMark({ className }: { className?: string }) {
+// The PatchProof "P" mark (from Group.svg, shape unchanged). The P body matches the
+// wordmark's off-white; the pixel blocks carry the signal red and glitch on hover.
+const P_BODY = "M647.139 154.4C644.739 156.1 643.339 159.4 622.339 212.5C613.839 233.9 601.339 265.7 594.439 283C587.639 300.3 579.239 321.5 575.939 330C542.539 414.8 543.139 413.5 535.539 422.7C529.739 429.6 524.639 433.6 516.239 437.6C502.439 444.2 508.839 444 363.439 444C234.939 444 231.539 444 227.839 445.9C222.939 448.5 222.339 449.5 214.439 469C203.739 495.8 188.339 533.3 166.739 585.5C155.639 612.4 145.039 638.1 143.239 642.5C124.739 687.5 110.539 721.3 84.2394 783C76.3394 801.4 64.9394 828.2 58.9394 842.5C52.8394 856.8 39.1393 889.3 28.3393 914.7C17.5393 940.1 8.73936 961.6 8.73936 962.5C8.73936 964.6 10.6394 968.2 12.6394 969.7C13.8394 970.7 49.0394 970.9 169.539 971H324.839L328.739 967.2C332.039 964 334.039 960 342.339 939.5C363.739 886.2 410.939 767.6 433.739 710C443.139 686.1 458.439 647.4 467.739 624C497.139 549.8 509.739 518.1 518.439 496C523.039 484.2 528.039 472.5 529.439 470.1C535.239 460.1 544.639 452.5 556.039 448.7C562.139 446.6 563.739 446.5 637.739 446.2C729.439 445.8 731.839 446 753.239 456.5C773.539 466.5 789.439 482 799.739 502C817.739 537.1 816.739 574.2 796.639 615.5C769.439 671.5 715.739 711.9 647.739 727.5C623.539 733 620.239 733.3 558.539 733.9L500.739 734.5L497.839 737.5C495.639 739.7 491.339 749.2 481.339 774.7C473.839 793.6 467.739 809.8 467.739 810.8C467.739 811.9 468.539 813.4 469.539 814.3C471.239 815.9 479.839 816 572.339 816C652.539 816 676.339 815.7 688.039 814.5C769.539 806.6 837.539 774.4 892.239 717.9C941.839 666.7 972.239 602.8 983.439 526.5C985.939 509.5 985.939 459.9 983.339 442C977.339 399.2 965.939 363.6 946.539 327C900.939 241 820.139 179.9 726.739 160.7C696.639 154.5 651.839 150.9 647.139 154.4Z"
+const P_PIXELS = "M221.238 1.40002C219.638 2.10002 217.438 3.59998 216.538 4.59998C215.638 5.69998 209.838 19.4 203.738 35C197.638 50.7 191.538 66.2 190.238 69.5C172.938 113.3 162.738 140.7 162.738 143.1C162.738 147.1 165.238 150.6 168.938 151.9C171.038 152.6 193.538 153 237.938 153C311.938 153 308.538 152.7 313.538 160.3C317.938 166.9 317.238 171.4 308.538 193.5C304.438 203.9 296.638 223.7 291.238 237.5C285.938 251.2 275.038 278.9 267.038 299C241.438 363.5 240.638 365.6 241.638 368.3C243.938 374.4 236.238 374 363.038 374C486.438 374 481.638 374.2 485.838 369.4C486.738 368.3 490.338 360.7 493.638 352.5C497.038 344.2 501.338 333.9 503.238 329.5C505.038 325.1 510.238 312.5 514.738 301.5C519.238 290.5 529.838 264.8 538.238 244.5C571.538 164 571.938 163 571.238 159.9C570.838 158.3 569.438 156.1 568.038 155C565.538 153 564.138 153 456.338 153H347.138L342.738 150.7C336.638 147.7 333.738 143.1 333.738 136.5C333.738 131.1 333.138 132.6 362.438 57.5C381.938 7.5 382.438 5.7 378.738 2C376.738 0 375.438 0 300.538 0C239.438 0.1 223.638 0.300024 221.238 1.40002ZM32.5383 76.6C31.0383 77.4 29.1383 79.3 28.3383 80.8C24.5383 88.2 3.73828 143.1 3.73828 145.8C3.73828 147.9 4.53826 149.5 6.33826 150.9C8.93826 152.9 10.1383 153 45.4383 153C83.7383 153 84.9383 152.9 88.8383 148.4C90.9383 145.9 114.738 84.7 114.738 81.7C114.738 80.4 113.738 78.4 112.438 77.2C110.138 75 109.738 75 72.6383 75C41.5383 75.1 34.7383 75.3 32.5383 76.6Z M58.2394 224.9C53.5394 227.8 52.4394 229.6 47.0394 244C44.1394 251.4 32.6393 281.4 21.3393 310.6C10.0393 339.9 0.539388 364.9 0.139388 366.3C-0.260612 368.3 0.139388 369.5 2.13939 371.4L4.63939 374H79.4394C150.239 374 154.439 373.9 157.739 372.2C159.639 371.1 161.939 368.8 162.839 366.9C163.839 365 170.739 348.2 178.239 329.5C185.839 310.8 196.239 284.9 201.439 272C215.839 236.4 217.839 230.5 216.739 227.6C216.239 226.2 214.939 224.6 213.839 224.1C212.539 223.3 187.739 223 136.539 223C64.9394 223 61.1394 223.1 58.2394 224.9Z"
+
+export function LogoMark({ className, large, intro }: { className?: string; large?: boolean; intro?: boolean }) {
   return (
-    <svg viewBox="0 0 40 40" className={cn('shrink-0 drop-shadow-[0_0_8px_rgb(225_6_0/0.7)]', className)} aria-hidden>
-      <circle cx="20" cy="20" r="18" fill="none" stroke="var(--color-signal)" strokeWidth="2" strokeDasharray="88 6 14 6" />
-      <circle cx="20" cy="20" r="12" fill="none" stroke="var(--color-blood-600)" strokeWidth="1" />
-      <circle cx="20" cy="20" r="7" fill="none" stroke="var(--color-signal)" strokeWidth="3" />
-      <circle cx="20" cy="20" r="1.6" fill="var(--color-phosphor)" />
-      <path d="M20 0v6M20 34v6M0 20h6M34 20h6" stroke="var(--color-signal)" strokeWidth="1.5" />
+    <svg viewBox="0 0 986 971" aria-hidden
+      className={cn('logo-mark shrink-0 overflow-visible text-[#f6efeb]', large && 'logo-mark-lg', intro && 'mark-intro', className)}>
+      <path d={P_BODY} fill="currentColor" />
+      <path d={P_PIXELS} fill="var(--color-signal)" className="logo-px" />
     </svg>
   )
 }
@@ -23,11 +26,27 @@ export function Wordmark({ className, intro }: { className?: string; intro?: boo
   )
 }
 
+// Mark + wordmark at large display sizes (boot screen, Overview hero). Sizes are passed in
+// so the mark stays at ~0.78x the wordmark's font size everywhere.
+export function Lockup({ markClass, textClass, className, intro }: {
+  markClass: string
+  textClass: string
+  className?: string
+  intro?: boolean
+}) {
+  return (
+    <span className={cn('inline-flex items-center', className)}>
+      <LogoMark large intro={intro} className={cn('w-auto', markClass)} />
+      <Wordmark intro={intro} className={cn('top-[0.07em]', textClass)} />
+    </span>
+  )
+}
+
 export function Logo({ className }: { className?: string }) {
   return (
     <a href={href.overview} className={cn('group inline-flex items-center gap-3 outline-offset-4', className)} aria-label="PatchProof overview">
-      <LogoMark className="size-11" />
-      <Wordmark className="wordmark-bright text-[2.6rem]" />
+      <LogoMark className="h-[2.05rem] w-auto -translate-y-px" />
+      <Wordmark className="wordmark-bright top-[0.07em] text-[2.6rem]" />
     </a>
   )
 }

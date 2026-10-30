@@ -113,18 +113,17 @@ export function PipelineRing({ segments, title, subline, titleClass, busy, hot, 
             <line x1={C} y1={C - 20} x2={C} y2={C - R - 16} stroke="var(--color-ember)" strokeWidth="1.5" strokeLinecap="round" opacity="0.9" />
           </g>
         )}
-        <circle cx={C} cy={C} r="9" fill="var(--color-void)" stroke="var(--color-signal)" strokeWidth="2" />
       </svg>
 
       <figcaption className={cn('pointer-events-none absolute inset-0 text-center transition-opacity duration-200', hideCenter && 'opacity-0')}>
         <span className={cn(
-          'absolute top-[41%] left-1/2 -translate-x-1/2 -translate-y-1/2 font-heading leading-none tracking-[0.04em] whitespace-nowrap uppercase',
+          'absolute top-[45%] left-1/2 -translate-x-1/2 -translate-y-1/2 font-heading leading-none tracking-[0.04em] whitespace-nowrap uppercase',
           title.length > 9 ? 'text-[0.95rem]' : title.length > 6 ? 'text-[1.1rem]' : 'text-[1.3rem]',
           titleClass,
         )}>
           {title}
         </span>
-        <span className="absolute top-[56%] left-1/2 w-[9.5rem] -translate-x-1/2 text-xs leading-snug text-ash">{subline}</span>
+        <span className="absolute top-[52%] left-1/2 w-[9.5rem] -translate-x-1/2 text-xs leading-snug text-ash">{subline}</span>
       </figcaption>
     </figure>
   )
