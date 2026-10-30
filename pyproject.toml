@@ -1,0 +1,22 @@
+[project]
+name = "patchproof"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.162.0",
+    "libcst>=1.9.0",
+    "requests>=2.34.2",
+    "tinydb>=4.9.0",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["engine/tests", "backend/tests"]
+pythonpath = ["."]
+addopts = "--import-mode=importlib"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.2.0",
+]

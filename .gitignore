@@ -1,0 +1,26 @@
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+
+# Runtime data (TinyDB file, patched workspace copy)
+backend/data/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Local-only font source packs (needed files are copied into frontend/public/fonts)
+Technor_Complete/
+Terminal-Grotesque-master/

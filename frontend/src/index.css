@@ -1,0 +1,286 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* Brand fonts. Exactly three, strict roles (PROJECT_CONTEXT.md §9). */
+@font-face {
+  font-family: "Technor";
+  src: url("/fonts/technor-variable.woff2") format("woff2");
+  font-weight: 200 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Moonhouse";
+  src: url("/fonts/moonhouse.ttf") format("truetype");
+  font-display: swap;
+}
+@font-face {
+  font-family: "Vintage Glitch";
+  src: url("/fonts/vintage-glitch.otf") format("opentype");
+  font-display: block;
+}
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-body: "Technor", system-ui, sans-serif;
+  --font-heading: "Moonhouse", "Technor", sans-serif;
+  --font-logo: "Vintage Glitch", "Moonhouse", sans-serif;
+  /* No monospace in this project: code and logs use the body font. */
+  --font-mono: var(--font-body);
+  --default-mono-font-family: var(--font-body);
+
+  --color-void: #050505;
+  --color-panel: #0c0606;
+  --color-blood-950: #1a0000;
+  --color-blood-800: #3a0000;
+  --color-blood-600: #8b0000;
+  --color-signal: #e10600;
+  --color-ember: #ff3b30;
+  --color-bone: #f2e9e4;
+  --color-ash: #8a7f7b;
+  --color-amber: #ffb000;
+  --color-phosphor: #ffe4e1;
+}
+
+@theme inline {
+  --font-sans: var(--font-body);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+/* Dark only: shadcn tokens mapped onto the PatchProof palette. */
+:root {
+  color-scheme: dark;
+  --background: #050505;
+  --foreground: #f2e9e4;
+  --card: #0c0606;
+  --card-foreground: #f2e9e4;
+  --popover: #0c0606;
+  --popover-foreground: #f2e9e4;
+  --primary: #e10600;
+  --primary-foreground: #fff5f3;
+  --secondary: #1a0000;
+  --secondary-foreground: #f2e9e4;
+  --muted: #140707;
+  --muted-foreground: #8a7f7b;
+  --accent: #3a0000;
+  --accent-foreground: #f2e9e4;
+  --destructive: #ff3b30;
+  --border: rgb(225 6 0 / 0.2);
+  --input: rgb(225 6 0 / 0.28);
+  --ring: #e10600;
+  --radius: 0.125rem;
+
+  --glow-signal: 0 0 6px rgb(225 6 0 / 0.75), 0 0 22px rgb(225 6 0 / 0.45), 0 0 48px rgb(225 6 0 / 0.25);
+  --glow-phosphor: 0 0 4px #fff, 0 0 14px rgb(255 228 225 / 0.8), 0 0 36px rgb(225 6 0 / 0.6);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/60;
+  }
+  html {
+    font-family: var(--font-body);
+    font-size-adjust: from-font;
+    background: var(--color-void);
+  }
+  body {
+    @apply bg-background text-foreground;
+    min-height: 100dvh;
+    font-weight: 400;
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 {
+    font-family: var(--font-heading);
+    font-weight: 400;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  pre, code, kbd, samp {
+    font-family: var(--font-body);
+  }
+  ::selection {
+    background: var(--color-signal);
+    color: #fff;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ember);
+    outline-offset: 2px;
+  }
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  /* Halftone dot screen bleeding in from the top-right, like a dithered print. */
+  .halftone::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: radial-gradient(circle, rgb(225 6 0 / 0.35) 1px, transparent 1.7px) 0 0 / 7px 7px;
+    mask-image: radial-gradient(ellipse 70% 60% at 92% 0%, #000 0%, transparent 70%);
+  }
+
+  /* CRT scanlines + vignette + grain over the whole console; never blocks input. */
+  .crt::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    pointer-events: none;
+    background:
+      repeating-linear-gradient(to bottom, rgb(0 0 0 / 0) 0 2px, rgb(0 0 0 / 0.22) 2px 3px),
+      radial-gradient(ellipse at center, transparent 55%, rgb(0 0 0 / 0.55) 100%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.07'/%3E%3C/svg%3E");
+  }
+
+  .text-glow {
+    text-shadow: var(--glow-signal);
+  }
+  .text-glow-hot {
+    text-shadow: var(--glow-phosphor);
+  }
+
+  /* Console panel with one chamfered corner, the "case" of the device. */
+  .panel {
+    position: relative;
+    background: linear-gradient(180deg, rgb(26 0 0 / 0.55), rgb(12 6 6 / 0.92));
+    border: 1px solid var(--border);
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+  }
+
+  /* The single hazard sticker on the page. */
+  .sticker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.6rem 0.25rem 0.25rem;
+    background: var(--color-bone);
+    color: var(--color-void);
+    font-weight: 700;
+    font-size: 0.6875rem;
+    letter-spacing: 0.04em;
+    rotate: -4deg;
+    box-shadow: 0 6px 18px rgb(0 0 0 / 0.6);
+  }
+  .sticker::before {
+    content: "";
+    width: 1.4rem;
+    align-self: stretch;
+    background: repeating-linear-gradient(-45deg, var(--color-signal) 0 4px, var(--color-void) 4px 8px);
+  }
+
+  /* RGB-split glitch on the wordmark, on hover/focus only. */
+  .glitch {
+    position: relative;
+  }
+  .glitch::before,
+  .glitch::after {
+    content: attr(data-text);
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .glitch::before {
+    color: var(--color-ember);
+    translate: -2px 0;
+  }
+  .glitch::after {
+    color: var(--color-phosphor);
+    translate: 2px 0;
+    mix-blend-mode: screen;
+  }
+  :where(a, button):is(:hover, :focus-visible) .glitch::before,
+  :where(a, button):is(:hover, :focus-visible) .glitch::after {
+    opacity: 0.8;
+    @media (prefers-reduced-motion: no-preference) {
+      animation: glitch-slice 0.9s steps(1, end) infinite;
+    }
+  }
+  :where(a, button):is(:hover, :focus-visible) .glitch::after {
+    animation-direction: reverse;
+  }
+
+  .pulse-amber {
+    @media (prefers-reduced-motion: no-preference) {
+      animation: pulse-amber 2.4s ease-in-out infinite;
+    }
+  }
+
+  .spin-slow {
+    transform-origin: center;
+    transform-box: fill-box;
+    @media (prefers-reduced-motion: no-preference) {
+      animation: spin 90s linear infinite;
+    }
+  }
+  .spin-scan {
+    transform-origin: center;
+    transform-box: view-box;
+    @media (prefers-reduced-motion: no-preference) {
+      animation: spin 1.6s linear infinite;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      opacity: 0.5;
+    }
+  }
+
+  .ticker-track {
+    @media (prefers-reduced-motion: no-preference) {
+      animation: ticker 40s linear infinite;
+    }
+  }
+
+  .outline-text {
+    color: transparent;
+    -webkit-text-stroke: 1px rgb(225 6 0 / 0.55);
+  }
+}
+
+@keyframes glitch-slice {
+  0% { clip-path: inset(0 0 72% 0); }
+  20% { clip-path: inset(38% 0 40% 0); }
+  40% { clip-path: inset(80% 0 4% 0); }
+  60% { clip-path: inset(12% 0 64% 0); }
+  80% { clip-path: inset(55% 0 22% 0); }
+  100% { clip-path: inset(0 0 72% 0); }
+}
+@keyframes pulse-amber {
+  50% { opacity: 0.55; }
+}
+@keyframes spin {
+  to { rotate: 360deg; }
+}
+@keyframes ticker {
+  to { translate: -50% 0; }
+}
