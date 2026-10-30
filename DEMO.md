@@ -18,6 +18,7 @@
 ## The script (about 2:00)
 
 ### 0:00–0:15 · The problem (Overview page)
+- Optional opener: **reload the page** in front of the judges. The scanner boot sequence plays for about 2.5 seconds, then the iris opens on the dashboard.
 > "Scanners flood teams with alerts nobody trusts, and auto-fix tools ship patches that quietly break the app. PatchProof only reports what it can **prove**, and only calls a fix done when it's **proven** not to break anything."
 
 ### 0:15–0:30 · Find (click **Scan target**, then the **Findings** page)

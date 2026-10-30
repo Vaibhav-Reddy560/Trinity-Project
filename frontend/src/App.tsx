@@ -1,5 +1,6 @@
 import { Loader, Search } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { BootScreen } from '@/components/BootScreen'
 import { CommandPalette } from '@/components/CommandPalette'
 import { GlobalActions } from '@/components/GlobalActions'
 import { PcbTraces } from '@/components/PcbTraces'
@@ -43,6 +44,7 @@ export default function App() {
   const activityCount = useMemo(() => activityOf(vulns).length, [vulns])
   const onRun = (a: Action, id?: string) => void run(a, id)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [booting, setBooting] = useState(true)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -80,7 +82,9 @@ export default function App() {
   else page = <OverviewPage vulns={vulns} pending={pending} onRun={onRun} />
 
   return (
-    <div className="crt halftone relative isolate min-h-dvh">
+    <>
+    {booting && <BootScreen ready={loaded} onDone={() => setBooting(false)} />}
+    <div className="crt halftone relative isolate min-h-dvh" inert={booting}>
       <a href="#main" className="sr-only z-[70] bg-signal px-4 py-2 text-white focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
         Skip to content
       </a>
@@ -122,7 +126,8 @@ export default function App() {
       </div>
 
       <Toasts notices={notices} />
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} vulns={vulns} pending={pending} onRun={onRun} />
+      <CommandPalette open={paletteOpen && !booting} onOpenChange={setPaletteOpen} vulns={vulns} pending={pending} onRun={onRun} />
     </div>
+    </>
   )
 }
