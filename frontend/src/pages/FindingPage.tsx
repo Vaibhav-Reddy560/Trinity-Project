@@ -1,7 +1,8 @@
 import { Bug, ChevronLeft, ChevronRight, CircleAlert, FlaskConical, ShieldCheck, Wrench } from 'lucide-react'
 import { CodeBlock } from '@/components/CodeBlock'
 import { DiffView } from '@/components/DiffView'
-import { EvidenceLog, Highlight } from '@/components/EvidenceLog'
+import { useEffect, useRef, useState } from 'react'
+import { EvidenceLog, Highlight, LINE_STAGGER_MS } from '@/components/EvidenceLog'
 import { TYPE_INFO } from '@/lib/knowledge'
 import { PageHeader, Panel } from '@/components/Panel'
 import { Pill, SeverityTag, VerdictPill, caseTone } from '@/components/Pills'
@@ -85,6 +86,7 @@ const stageDot: Record<Stage['state'], string> = {
 }
 
 const stepIcon = { poc: Bug, patch: Wrench, verify: ShieldCheck }
+const STEP_TAB: Record<StepAction, string> = { poc: 'evidence', patch: 'patch', verify: 'tests' }
 const stepLabel: Record<StepAction, string> = { poc: 'Run exploit', patch: 'Apply patch', verify: 'Verify fix' }
 const stepRunning: Record<StepAction, string> = { poc: 'Running exploit', patch: 'Applying patch', verify: 'Verifying fix' }
 
@@ -107,6 +109,38 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
   const passed = cases.filter((c) => caseResult(c, vuln) === 'Passed').length
   const info = TYPE_INFO[vuln.type]
   const proofs = provenLeaks(vuln, SECURITY_IDS)
+
+  // Each action opens the tab where its result lands, so the evidence types in on screen.
+  const [tab, setTab] = useState('summary')
+  const act = (a: StepAction) => {
+    setTab(STEP_TAB[a])
+    onAction(a, vuln.id)
+  }
+
+  // Proof box glitches in only when it appears (or changes) while the page is open,
+  // and only after the evidence lines above it have finished typing in.
+  const proofKey = proofs.join('|')
+  const initialProofKey = useRef(proofKey)
+  const proofsAreNew = proofKey !== initialProofKey.current
+  const [revealedKey, setRevealedKey] = useState(proofKey)
+  useEffect(() => {
+    if (!proofsAreNew) return
+    const t = window.setTimeout(() => setRevealedKey(proofKey), vuln.poc_log.length * LINE_STAGGER_MS + 300)
+    return () => window.clearTimeout(t)
+  }, [proofKey, proofsAreNew, vuln.poc_log.length])
+  const proofsShown = !proofsAreNew || revealedKey === proofKey
+
+  // One stamp when this finding turns Verified while you are watching.
+  const prevVerdict = useRef(verdict)
+  const [stamped, setStamped] = useState(false)
+  useEffect(() => {
+    const justVerified = prevVerdict.current !== 'Verified' && verdict === 'Verified'
+    prevVerdict.current = verdict
+    if (!justVerified) return
+    setStamped(true)
+    const t = window.setTimeout(() => setStamped(false), 2800)
+    return () => window.clearTimeout(t)
+  }, [verdict])
 
   return (
     <>
@@ -149,7 +183,7 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
               const running = busyHere && pending?.action === a
               return (
                 <Button key={a} size="lg" variant={a === next ? 'default' : 'outline'} disabled={pending !== null || !enabled[a]}
-                  onClick={() => onAction(a, vuln.id)}
+                  onClick={() => act(a)}
                   className={cn(a === next && 'shadow-[var(--glow-signal)]', 'disabled:shadow-none')}>
                   <Icon /> {running ? stepRunning[a] : stepLabel[a]}
                 </Button>
@@ -161,15 +195,19 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         <Panel title="Pipeline" className="self-start">
-          <PipelineRing
-            label={`Pipeline status: ${verdict}`}
-            title={verdict}
-            subline={sublineFor[verdict]}
-            titleClass={verdictTitleClass[verdict]}
-            hot={verdict === 'Verified'}
-            busy={busyHere}
-            segments={ringSegments(stages)}
-          />
+          <div className={cn('relative', stamped && 'ring-jolt')}>
+            <PipelineRing
+              label={`Pipeline status: ${verdict}`}
+              title={verdict}
+              subline={sublineFor[verdict]}
+              titleClass={verdictTitleClass[verdict]}
+              hot={verdict === 'Verified'}
+              busy={busyHere}
+              segments={ringSegments(stages)}
+              hideCenter={stamped}
+            />
+            {stamped && <span className="stamp" aria-hidden>Verified</span>}
+          </div>
           <ol className="mt-6 space-y-4">
             {stages.map((s) => (
               <li key={s.key} className="grid grid-cols-[0.75rem_1fr] gap-3">
@@ -183,7 +221,7 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
           </ol>
         </Panel>
 
-        <Tabs defaultValue="summary" className="panel min-w-0 gap-0">
+        <Tabs value={tab} onValueChange={setTab} className="panel min-w-0 gap-0">
           <TabsList variant="line" className="h-auto w-full justify-start gap-0 overflow-x-auto border-b border-border px-3">
             {[
               { v: 'summary', label: 'Summary' },
@@ -247,8 +285,8 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
           <TabsContent value="evidence" className="space-y-6 p-5">
             {vuln.patchable ? (
               <>
-                {proofs.length > 0 && (
-                  <div className="border border-ember/60 bg-ember/8 p-4">
+                {proofs.length > 0 && proofsShown && (
+                  <div key={proofKey} className={cn('border border-ember/60 bg-ember/8 p-4', proofsAreNew && 'glitch-in-box')}>
                     <h3 className="flex items-center gap-2 text-xs text-ember"><CircleAlert className="size-4" aria-hidden />What the exploit proved</h3>
                     <ul className="mt-3 space-y-1.5">
                       {proofs.map((p) => (
@@ -257,6 +295,10 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
                     </ul>
                   </div>
                 )}
+                <div>
+                  <h3 className="mb-3 text-xs text-signal">Exploit log</h3>
+                  <EvidenceLog lines={vuln.poc_log} empty="Run the exploit to capture evidence. Every database query and every prompt sent to the model is recorded." />
+                </div>
                 <div>
                   <h3 className="mb-3 text-xs text-signal">Exploit cases</h3>
                   <ul className="grid gap-3 md:grid-cols-2">
@@ -267,10 +309,6 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
                       </li>
                     ))}
                   </ul>
-                </div>
-                <div>
-                  <h3 className="mb-3 text-xs text-signal">Exploit log</h3>
-                  <EvidenceLog lines={vuln.poc_log} empty="Run the exploit to capture evidence. Every database query and every prompt sent to the model is recorded." />
                 </div>
               </>
             ) : (

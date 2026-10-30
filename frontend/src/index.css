@@ -177,8 +177,8 @@
   }
   /* Sidebar size: brighter white core so it doesn't look dull next to the hero. */
   .wordmark-bright {
-    color: #fff;
-    text-shadow: 0 0 2px rgb(255 255 255 / 0.55), 0 0 8px rgb(225 6 0 / 0.8), 0 0 22px rgb(225 6 0 / 0.45);
+    color: #f6efeb;
+    text-shadow: 0 0 2px rgb(255 255 255 / 0.25), 0 0 8px rgb(225 6 0 / 0.65), 0 0 20px rgb(225 6 0 / 0.35);
   }
 
   .text-glow {
@@ -283,6 +283,67 @@
     }
   }
 
+  /* New evidence lines scan in left-to-right, staggered via inline animation-delay. */
+  .line-in {
+    @media (prefers-reduced-motion: no-preference) {
+      animation: line-in 420ms steps(14, end) both;
+    }
+  }
+  .type-cursor {
+    display: inline-block;
+    width: 0.55em;
+    height: 1em;
+    margin-left: 0.3em;
+    vertical-align: -0.15em;
+    background: currentColor;
+    @media (prefers-reduced-motion: no-preference) {
+      animation: blink 1s steps(1, end) infinite;
+    }
+  }
+  /* The proof callout lands last with one short glitch. */
+  .glitch-in-box {
+    @media (prefers-reduced-motion: no-preference) {
+      animation: glitch-box 520ms steps(1, end) both;
+    }
+  }
+
+  /* Pipeline arcs draw themselves (paths use pathLength="1"). */
+  .arc-draw {
+    stroke-dasharray: 1;
+    @media (prefers-reduced-motion: no-preference) {
+      animation: arc-draw 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    }
+  }
+
+  /* Verified stamp: slams onto the ring once, holds, fades. */
+  .stamp {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    translate: -50% -50%;
+    rotate: -10deg;
+    padding: 0.3rem 0.9rem 0.35rem;
+    border: 3px solid var(--color-phosphor);
+    background: rgb(5 5 5 / 0.8);
+    color: var(--color-phosphor);
+    font-family: var(--font-heading);
+    font-size: 1.55rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    text-shadow: var(--glow-phosphor);
+    box-shadow: 0 0 18px rgb(225 6 0 / 0.55), inset 0 0 12px rgb(255 228 225 / 0.2);
+    pointer-events: none;
+    animation: stamp-fade 2.8s ease-out both;
+    @media (prefers-reduced-motion: no-preference) {
+      animation: stamp-in 380ms cubic-bezier(0.2, 1.4, 0.4, 1) both, stamp-fade 2.8s ease-out both;
+    }
+  }
+  .ring-jolt {
+    @media (prefers-reduced-motion: no-preference) {
+      animation: ring-jolt 320ms steps(1, end) 120ms both;
+    }
+  }
+
   .ticker-track {
     @media (prefers-reduced-motion: no-preference) {
       animation: ticker 60s linear infinite;
@@ -352,6 +413,37 @@
 @keyframes glitch-fade {
   0%, 90% { opacity: 0.85; }
   100% { opacity: 0; }
+}
+@keyframes line-in {
+  from { clip-path: inset(0 100% 0 0); opacity: 0.5; }
+  to { clip-path: inset(0 0 0 0); opacity: 1; }
+}
+@keyframes blink {
+  50% { opacity: 0; }
+}
+@keyframes glitch-box {
+  0% { opacity: 0; translate: -6px 0; clip-path: inset(0 0 60% 0); }
+  25% { opacity: 1; translate: 5px 0; clip-path: inset(40% 0 0 0); }
+  50% { translate: -2px 0; clip-path: inset(0 0 20% 0); }
+  75%, 100% { opacity: 1; translate: 0 0; clip-path: none; }
+}
+@keyframes arc-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes stamp-in {
+  from { scale: 1.9; }
+  to { scale: 1; }
+}
+@keyframes stamp-fade {
+  0%, 80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes ring-jolt {
+  0% { translate: -4px 1px; }
+  33% { translate: 4px -1px; }
+  66% { translate: -1px 0; }
+  100% { translate: 0 0; }
 }
 @keyframes pulse-amber {
   50% { opacity: 0.55; }

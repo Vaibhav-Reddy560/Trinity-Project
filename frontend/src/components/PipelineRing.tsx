@@ -35,7 +35,7 @@ function arc(r: number, start: number, end: number) {
 const RIM = 'find the flaw  /  prove the fix  /  vuln-bank 4bb7cd5  /  synthetic data only  /  '
 
 // The signature element: four pipeline stages as arcs around a disc, verdict in the centre.
-export function PipelineRing({ segments, title, subline, titleClass, busy, hot, className, label }: {
+export function PipelineRing({ segments, title, subline, titleClass, busy, hot, className, label, hideCenter }: {
   segments: RingSegment[]
   title: string
   subline: string
@@ -44,6 +44,7 @@ export function PipelineRing({ segments, title, subline, titleClass, busy, hot, 
   hot?: boolean
   className?: string
   label: string
+  hideCenter?: boolean
 }) {
   return (
     <figure className={cn('relative mx-auto w-full max-w-[21rem]', className)} aria-label={label}>
@@ -55,6 +56,10 @@ export function PipelineRing({ segments, title, subline, titleClass, busy, hot, 
             <stop offset="100%" stopColor="#050505" />
           </radialGradient>
           <path id="ring-rim" d={`M ${C} ${C} m -152 0 a 152 152 0 1 1 304 0 a 152 152 0 1 1 -304 0`} />
+          <linearGradient id="ring-sweep" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="var(--color-signal)" stopOpacity="0" />
+            <stop offset="100%" stopColor="var(--color-ember)" stopOpacity="0.32" />
+          </linearGradient>
         </defs>
 
         <circle cx={C} cy={C} r="172" fill="url(#ring-face)" stroke="var(--color-blood-800)" />
@@ -83,9 +88,15 @@ export function PipelineRing({ segments, title, subline, titleClass, busy, hot, 
               <path d={arc(R, start, end)} fill="none" stroke="var(--color-blood-950)" strokeWidth="14" />
               <path d={arc(R, start, end)} fill="none" stroke="var(--color-blood-800)" strokeWidth="14" strokeOpacity="0.6" />
               {s.fill > 0 && (
-                <path d={arc(R, start, fillEnd)} fill="none" stroke={stroke[s.tone]} strokeWidth="12"
-                  className={cn(s.pulse && 'pulse-amber')}
-                  style={s.tone === 'signal' || s.tone === 'hot' ? { filter: 'drop-shadow(0 0 5px rgb(225 6 0 / 0.8))' } : undefined} />
+                <g className={cn(s.pulse && 'pulse-amber')}>
+                  {/* Keyed on fill/tone so the arc re-draws itself whenever the stage advances. */}
+                  <path key={`${s.fill}-${s.tone}`} d={arc(R, start, fillEnd)} pathLength={1} fill="none" stroke={stroke[s.tone]} strokeWidth="12"
+                    className="arc-draw"
+                    style={{
+                      animationDelay: `${i * 120}ms`,
+                      ...(s.tone === 'signal' || s.tone === 'hot' ? { filter: 'drop-shadow(0 0 5px rgb(225 6 0 / 0.8))' } : {}),
+                    }} />
+                </g>
               )}
               <text x={mid.x} y={mid.y} textAnchor="middle" dominantBaseline="middle" fontSize="12" fontWeight="600"
                 fill={s.dim ? 'var(--color-ash)' : 'var(--color-bone)'} opacity={s.dim ? 0.6 : 1} style={{ fontFamily: 'var(--font-body)' }}>
@@ -97,13 +108,15 @@ export function PipelineRing({ segments, title, subline, titleClass, busy, hot, 
 
         {busy && (
           <g className="spin-scan">
-            <path d={arc(R + 15, 0, 40)} fill="none" stroke="var(--color-ember)" strokeWidth="2.5" strokeLinecap="round" />
+            {/* Radar sweep: a fading wedge trailing a bright leading edge at 12 o'clock. */}
+            <path d={`M ${C} ${C} L ${polar(R + 16, -55).x} ${polar(R + 16, -55).y} A ${R + 16} ${R + 16} 0 0 1 ${C} ${C - R - 16} Z`} fill="url(#ring-sweep)" />
+            <line x1={C} y1={C - 20} x2={C} y2={C - R - 16} stroke="var(--color-ember)" strokeWidth="1.5" strokeLinecap="round" opacity="0.9" />
           </g>
         )}
         <circle cx={C} cy={C} r="9" fill="var(--color-void)" stroke="var(--color-signal)" strokeWidth="2" />
       </svg>
 
-      <figcaption className="pointer-events-none absolute inset-0 text-center">
+      <figcaption className={cn('pointer-events-none absolute inset-0 text-center transition-opacity duration-200', hideCenter && 'opacity-0')}>
         <span className={cn(
           'absolute top-[41%] left-1/2 -translate-x-1/2 -translate-y-1/2 font-heading leading-none tracking-[0.04em] whitespace-nowrap uppercase',
           title.length > 9 ? 'text-[0.95rem]' : title.length > 6 ? 'text-[1.1rem]' : 'text-[1.3rem]',
