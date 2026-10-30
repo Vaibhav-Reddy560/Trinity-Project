@@ -63,4 +63,4 @@ target_app/   pinned vuln-bank snapshot (never edited) + offline harness, fixtur
 frontend/     React + Vite + Tailwind + shadcn/ui dashboard
 ```
 
-Specs and contracts are in [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md). Team and agent rules are in [`AGENT_RULES.md`](AGENT_RULES.md).
+The 2-minute walkthrough for judges is in [`DEMO.md`](DEMO.md). Specs and contracts are in [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md). Team and agent rules are in [`AGENT_RULES.md`](AGENT_RULES.md).
