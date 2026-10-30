@@ -45,6 +45,12 @@ export interface Vuln {
 
 export type Action = 'scan' | 'poc' | 'patch' | 'verify' | 'run-all' | 'reset'
 
+export interface Health {
+  status: string
+  busy: boolean
+  action: Action | null
+}
+
 export interface Accepted {
   accepted: true
   action: Action

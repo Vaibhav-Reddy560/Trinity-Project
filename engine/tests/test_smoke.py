@@ -8,7 +8,3 @@ def test_engine_contract_importable():
     assert callable(engine.apply_patch)
     assert callable(engine.verify_fix)
     assert PATCHABLE_TYPES == {"AI_PROMPT_INJECTION", "AI_BROKEN_AUTH"}
-
-
-def test_scanner_stub_returns_list():
-    assert engine.scan_repository("target_app/vuln-bank") == []

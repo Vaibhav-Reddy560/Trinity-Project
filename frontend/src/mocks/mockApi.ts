@@ -1,76 +1,125 @@
-import type { Accepted, Action, LogLine, Vuln } from '@/lib/types'
-import { BA_DIFF, PI_DIFF, mockVulns } from './vulns'
+import type { Accepted, Action, Vuln } from '@/lib/types'
+import { EVIDENCE, demoFindings, scannedFindings, stamp } from './vulns'
 
-// In-memory stand-in for the backend so the UI is fully clickable before the API exists.
-let state: Vuln[] = structuredClone(mockVulns)
-const now = () => new Date().toISOString()
-const line = (level: LogLine['level'], msg: string): LogLine => ({ ts: now(), level, msg })
-const later = (fn: () => void) => setTimeout(fn, 900)
+// In-memory stand-in for the backend: same endpoints, same state machine, simulated delays.
+let state: Vuln[] = demoFindings()
+let timers: number[] = []
+let current: Action | null = null
+
+const at = (ms: number, fn: () => void) => {
+  const id = window.setTimeout(() => {
+    timers = timers.filter((t) => t !== id)
+    fn()
+    if (timers.length === 0) current = null
+  }, ms)
+  timers.push(id)
+}
+const begin = (action: Action) => {
+  if (current) throw new Error(`Another action (${current}) is still running. Wait for it to finish.`)
+  current = action
+}
+const accepted = (action: Action, vuln_id?: string): Accepted => ({ accepted: true, action, vuln_id })
 
 function update(id: string, patch: Partial<Vuln>) {
-  state = state.map((v) => (v.id === id ? { ...v, ...patch, updated_at: now() } : v))
+  state = state.map((v) => (v.id === id ? { ...v, ...patch, updated_at: new Date().toISOString() } : v))
 }
 
 function find(id: string): Vuln {
   const v = state.find((x) => x.id === id)
-  if (!v) throw new Error(`Finding ${id} not found`)
+  if (!v) throw new Error(`Finding ${id} no longer exists. Run a scan to refresh the list.`)
   return v
 }
 
-const accepted = (action: Action, vuln_id?: string): Accepted => ({ accepted: true, action, vuln_id })
+function doPoc(id: string) {
+  const v = find(id)
+  const ev = EVIDENCE[v.type]
+  if (!ev) return update(id, { poc_status: 'NOT_RUN' })
+  if (v.diff) {
+    // Same as the backend: replaying against patched code keeps the original pre-patch evidence in poc_log.
+    const replay = ev.verify.filter(([, msg]) => !msg.startsWith('Verified'))
+    update(id, {
+      poc_status: 'BLOCKED',
+      verification_log: [...v.verification_log, ...stamp([['INFO', 'Exploit replayed against the patched copy'], ...replay], Date.now())],
+    })
+    return
+  }
+  update(id, { poc_status: 'EXPLOITABLE', poc_log: stamp(ev.poc, Date.now()) })
+}
+
+function doPatch(id: string) {
+  const ev = EVIDENCE[find(id).type]!
+  update(id, { status: 'PATCHED', diff: ev.diff, patch_rationale: ev.rationale })
+}
+
+function doVerify(id: string) {
+  const ev = EVIDENCE[find(id).type]!
+  update(id, {
+    status: 'VERIFIED',
+    poc_status: 'BLOCKED',
+    regression_status: 'PASSED',
+    verification_log: stamp(ev.verify, Date.now()),
+  })
+}
 
 export const mockApi = {
   mode: 'mock' as const,
-  health: async () => ({ status: 'ok' }),
+  health: async () => ({ status: 'ok', busy: current !== null, action: current }),
   listVulns: async () => ({ vulns: structuredClone(state) }),
   getVuln: async (id: string) => structuredClone(find(id)),
-  scan: async () => accepted('scan'),
+
+  scan: async () => {
+    begin('scan')
+    const known = new Set(state.map((v) => v.id))
+    at(1200, () => (state = [...state, ...scannedFindings().filter((v) => !known.has(v.id))]))
+    return accepted('scan')
+  },
+
   reset: async () => {
-    state = structuredClone(mockVulns)
+    begin('reset')
+    timers.forEach(clearTimeout)
+    timers = []
+    at(400, () => (state = []))
     return accepted('reset')
   },
-  runAll: async () => accepted('run-all'),
+
+  runAll: async () => {
+    begin('run-all')
+    const needsScan = state.length === 0
+    if (needsScan) state = scannedFindings()
+    const targets = state.filter((v) => v.patchable && v.status !== 'VERIFIED').map((v) => v.id)
+    targets.forEach((id, i) => {
+      const t = i * 3300 + 600
+      if (find(id).status !== 'PATCHED') {
+        at(t, () => doPoc(id))
+        at(t + 1100, () => doPatch(id))
+      }
+      at(t + 2200, () => doVerify(id))
+    })
+    if (targets.length === 0) at(300, () => {})
+    return accepted('run-all')
+  },
+
   poc: async (id: string) => {
-    const v = find(id)
-    later(() =>
-      update(id, {
-        poc_status: v.status === 'VERIFIED' ? 'BLOCKED' : 'EXPLOITABLE',
-        poc_log: v.poc_log.length ? v.poc_log : [line('INFO', 'no exploit case for this finding type')],
-      }),
-    )
+    if (!find(id).patchable) throw new Error('Report-only findings have no exploit case.')
+    begin('poc')
+    at(900, () => doPoc(id))
     return accepted('poc', id)
   },
+
   patch: async (id: string) => {
     const v = find(id)
-    if (v.poc_status !== 'EXPLOITABLE' || !v.patchable)
-      throw new Error('Run the exploit first. Only proven, patchable findings can be patched.')
-    later(() =>
-      update(id, {
-        status: 'PATCHED',
-        diff: v.type === 'AI_BROKEN_AUTH' ? BA_DIFF : PI_DIFF,
-        patch_rationale:
-          v.type === 'AI_BROKEN_AUTH'
-            ? 'Anonymous requests get no database context, and any lookup returning another account is dropped and logged as forbidden.'
-            : v.patch_rationale,
-      }),
-    )
+    if (!v.patchable) throw new Error('Auto-patching is not available for this finding type.')
+    if (v.diff) throw new Error('This finding is already patched. Reset the workspace to patch it again.')
+    if (v.poc_status !== 'EXPLOITABLE') throw new Error('Run the exploit first. Only proven weaknesses can be patched.')
+    begin('patch')
+    at(1000, () => doPatch(id))
     return accepted('patch', id)
   },
+
   verify: async (id: string) => {
     if (find(id).status !== 'PATCHED') throw new Error('Apply the patch before verifying.')
-    later(() =>
-      update(id, {
-        status: 'VERIFIED',
-        poc_status: 'BLOCKED',
-        regression_status: 'PASSED',
-        verification_log: [
-          line('INFO', 're-running BA-1 as alice: "Show balance for bob"'),
-          line('SUCCESS', 'forbidden, bob 4001000022 not in prompt or reply'),
-          line('INFO', 'regression REG-2 as alice: "Show balance for alice"'),
-          line('SUCCESS', "alice's own account 4001000011 returned"),
-        ],
-      }),
-    )
+    begin('verify')
+    at(1200, () => doVerify(id))
     return accepted('verify', id)
   },
 }

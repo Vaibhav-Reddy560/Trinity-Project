@@ -1,84 +1,128 @@
-import { useState } from 'react'
-import { FindingDetail, type StepAction } from '@/components/FindingDetail'
-import { Logo } from '@/components/Logo'
+import { Loader, Search } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { CommandPalette } from '@/components/CommandPalette'
+import { GlobalActions } from '@/components/GlobalActions'
 import { PcbTraces } from '@/components/PcbTraces'
-import { Ticker } from '@/components/Ticker'
-import { VulnList } from '@/components/VulnList'
+import { Sidebar } from '@/components/Sidebar'
+import { Toasts } from '@/components/Toasts'
 import { Button } from '@/components/ui/button'
-import { useVulns, type ApiState } from '@/hooks/useVulns'
-import { api } from '@/lib/api'
-import { cn } from '@/lib/utils'
+import { useVulns } from '@/hooks/useVulns'
+import { activityOf } from '@/lib/activity'
+import { typeName } from '@/lib/format'
+import { href, useRoute, type Route } from '@/lib/router'
+import { TARGET } from '@/lib/scope'
+import type { Action } from '@/lib/types'
+import { ActivityPage } from '@/pages/ActivityPage'
+import { FindingPage } from '@/pages/FindingPage'
+import { FindingsPage } from '@/pages/FindingsPage'
+import { OverviewPage } from '@/pages/OverviewPage'
+import { ReportPage } from '@/pages/ReportPage'
+import { ScopePage } from '@/pages/ScopePage'
 
-const apiBadge: Record<ApiState, { label: string; dot: string }> = {
-  mock: { label: 'Mock data', dot: 'bg-amber shadow-[0_0_8px_var(--color-amber)]' },
-  online: { label: 'API online', dot: 'bg-signal shadow-[0_0_8px_var(--color-signal)]' },
-  offline: { label: 'API offline', dot: 'bg-ash' },
+const RUNNING: Record<Action, string> = {
+  scan: 'Scanning target',
+  poc: 'Running exploit',
+  patch: 'Applying patch',
+  verify: 'Verifying fix',
+  'run-all': 'Running full pipeline',
+  reset: 'Resetting workspace',
+}
+
+const TITLES: Record<Route['name'], string> = {
+  overview: 'Overview',
+  findings: 'Findings',
+  finding: 'Finding',
+  scope: 'Target & scope',
+  activity: 'Activity',
+  report: 'Report',
 }
 
 export default function App() {
-  const { vulns, apiState, busy, error, run } = useVulns()
-  const [picked, setPicked] = useState<string | null>(null)
-  const selected = vulns.find((v) => v.id === picked) ?? vulns[0] ?? null
+  const route = useRoute()
+  const { vulns, loaded, apiState, pending, notices, run, reload } = useVulns()
+  const activityCount = useMemo(() => activityOf(vulns).length, [vulns])
+  const onRun = (a: Action, id?: string) => void run(a, id)
+  const [paletteOpen, setPaletteOpen] = useState(false)
 
-  const act = (a: StepAction) => {
-    if (!selected) return
-    const id = selected.id
-    void run(() => (a === 'poc' ? api.poc(id) : a === 'patch' ? api.patch(id) : api.verify(id)))
-  }
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen((o) => !o)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
+    const v = route.name === 'finding' ? vulns.find((x) => x.id === route.id) : undefined
+    document.title = `${v ? typeName[v.type] : TITLES[route.name]} | PatchProof`
+  }, [route, vulns])
+
+  let page: React.ReactNode
+  if (!loaded) page = <p className="text-ash">Loading findings…</p>
+  else if (route.name === 'findings') page = <FindingsPage vulns={vulns} pending={pending} onScan={() => onRun('scan')} />
+  else if (route.name === 'finding') {
+    const vuln = vulns.find((v) => v.id === route.id)
+    page = vuln ? (
+      <FindingPage key={vuln.id} vuln={vuln} vulns={vulns} pending={pending} onAction={onRun} />
+    ) : (
+      <section className="panel px-6 py-12 text-center">
+        <h1 className="text-xl text-bone">Finding not found</h1>
+        <p className="mt-3 text-ash">It may have been cleared by a reset or a new scan.</p>
+        <a href={href.findings} className="mt-5 inline-block text-ember hover:underline">Back to findings</a>
+      </section>
+    )
+  } else if (route.name === 'scope') page = <ScopePage />
+  else if (route.name === 'activity') page = <ActivityPage vulns={vulns} />
+  else if (route.name === 'report') page = <ReportPage vulns={vulns} />
+  else page = <OverviewPage vulns={vulns} pending={pending} onRun={onRun} />
 
   return (
-    <div className="crt halftone relative isolate flex min-h-dvh flex-col">
+    <div className="crt halftone relative isolate min-h-dvh">
+      <a href="#main" className="sr-only z-[70] bg-signal px-4 py-2 text-white focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
+        Skip to content
+      </a>
       <PcbTraces />
+      <Sidebar route={route} counts={{ findings: vulns.length, activity: activityCount }} apiState={apiState} />
 
-      <header className="flex flex-wrap items-center gap-x-8 gap-y-4 px-4 pt-5 pb-4 md:px-8">
-        <Logo />
-        <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs">
-          <div>
-            <dt className="text-ash">Target</dt>
-            <dd className="text-bone">vuln-bank at 4bb7cd5</dd>
+      <div className="lg:pl-64">
+        <div className="no-print sticky top-0 z-40 flex flex-wrap items-center justify-end gap-3 sm:justify-between border-b border-border bg-void/85 px-4 py-3 backdrop-blur md:px-8">
+          <div className="flex min-w-0 items-center gap-4">
+            <button type="button" onClick={() => setPaletteOpen(true)}
+              className="flex h-9 items-center gap-2 border border-border bg-void/60 px-3 text-sm text-ash transition-colors hover:border-signal/60 hover:text-bone md:w-72">
+              <Search className="size-4" aria-hidden />
+              <span className="hidden md:inline">Search or jump to</span>
+              <kbd className="ml-auto hidden border border-border px-1.5 text-xs text-ash md:inline">⌘K</kbd>
+            </button>
+            <p className="hidden items-center gap-2 text-sm text-ash xl:flex" role="status">
+              {pending ? (
+                <><Loader className="spin-scan size-4 text-signal" aria-hidden /><span className="text-bone">{RUNNING[pending.action]}</span></>
+              ) : (
+                <>Workspace <span className="text-bone">{TARGET.name}</span> at {TARGET.commit}</>
+              )}
+            </p>
           </div>
-          <div>
-            <dt className="text-ash">Module</dt>
-            <dd className="text-bone">AI customer support</dd>
-          </div>
-        </dl>
-        <div className="ml-auto flex items-center gap-4">
-          <span className="flex items-center gap-2 text-xs text-ash" role="status">
-            <span aria-hidden className={cn('size-2 rounded-full', apiBadge[apiState].dot)} />
-            {apiBadge[apiState].label}
-          </span>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void run(api.reset)}>
-            Reset
-          </Button>
-          <Button size="sm" disabled={busy} onClick={() => void run(api.runAll)} className="shadow-[var(--glow-signal)]">
-            Run all
-          </Button>
+          <GlobalActions pending={pending} onRun={onRun} />
         </div>
-      </header>
 
-      <Ticker />
+        <main id="main" className="mx-auto max-w-[90rem] px-4 py-8 md:px-8">
+          {loaded && apiState === 'offline' && (
+            <section role="alert" className="mb-6 flex flex-wrap items-center justify-between gap-4 border border-ember bg-ember/10 px-5 py-4">
+              <div>
+                <p className="font-semibold text-ember">Can't reach the PatchProof API</p>
+                <p className="mt-1 text-sm text-bone/85">Start it from the repo root with <kbd className="border border-border px-1.5">make api</kbd>, then retry.</p>
+              </div>
+              <Button variant="outline" size="lg" onClick={() => void reload()}>Retry</Button>
+            </section>
+          )}
+          {page}
+        </main>
+      </div>
 
-      <main className="grid flex-1 grid-cols-[minmax(0,1fr)] gap-4 px-4 py-5 md:px-8 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <aside className="panel self-start p-4" aria-labelledby="findings-heading">
-          <div className="mb-3 flex items-baseline justify-between">
-            <h2 id="findings-heading" className="text-base text-bone">Findings</h2>
-            <span className="text-xs text-ash tabular-nums">{vulns.length}</span>
-          </div>
-          <VulnList vulns={vulns} selectedId={selected?.id ?? null} onSelect={setPicked} />
-        </aside>
-
-        {selected ? (
-          <FindingDetail vuln={selected} busy={busy} error={error} onAction={act} />
-        ) : (
-          <section className="panel grid place-items-center p-10 text-center">
-            <div>
-              <h1 className="text-xl text-bone">Nothing scanned yet</h1>
-              <p className="mt-3 text-ash">Scan the target to find weaknesses in the AI customer support module.</p>
-              <Button className="mt-6" onClick={() => void run(api.scan)}>Scan target</Button>
-            </div>
-          </section>
-        )}
-      </main>
+      <Toasts notices={notices} />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} vulns={vulns} pending={pending} onRun={onRun} />
     </div>
   )
 }

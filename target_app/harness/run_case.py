@@ -19,7 +19,7 @@ PRISTINE_DIR = HARNESS_DIR.parent / "vuln-bank"
 def user_context(username: str | None) -> dict | None:
     import database
 
-    if username is None:
+    if username in (None, "anonymous"):
         return None
     u = next(u for u in database.USERS if u["username"] == username)
     # Same shape app.py:2363 builds for the authenticated /api/ai/chat route.

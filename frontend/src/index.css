@@ -38,7 +38,7 @@
   --color-signal: #e10600;
   --color-ember: #ff3b30;
   --color-bone: #f2e9e4;
-  --color-ash: #8a7f7b;
+  --color-ash: #a59a95;
   --color-amber: #ffb000;
   --color-phosphor: #ffe4e1;
 }
@@ -83,7 +83,7 @@
   --secondary: #1a0000;
   --secondary-foreground: #f2e9e4;
   --muted: #140707;
-  --muted-foreground: #8a7f7b;
+  --muted-foreground: #a59a95;
   --accent: #3a0000;
   --accent-foreground: #f2e9e4;
   --destructive: #ff3b30;
@@ -113,10 +113,13 @@
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
   }
+  /* Moonhouse capitals read far better than its stylised lowercase. */
   h1, h2, h3 {
     font-family: var(--font-heading);
     font-weight: 400;
-    line-height: 1.15;
+    line-height: 1.25;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
     text-wrap: balance;
   }
   p {
@@ -146,8 +149,8 @@
     inset: 0;
     z-index: -1;
     pointer-events: none;
-    background: radial-gradient(circle, rgb(225 6 0 / 0.35) 1px, transparent 1.7px) 0 0 / 7px 7px;
-    mask-image: radial-gradient(ellipse 70% 60% at 92% 0%, #000 0%, transparent 70%);
+    background: radial-gradient(circle, rgb(225 6 0 / 0.28) 1px, transparent 1.7px) 0 0 / 7px 7px;
+    mask-image: radial-gradient(ellipse 55% 45% at 100% 0%, #000 0%, transparent 70%);
   }
 
   /* CRT scanlines + vignette + grain over the whole console; never blocks input. */
@@ -158,8 +161,8 @@
     z-index: 50;
     pointer-events: none;
     background:
-      repeating-linear-gradient(to bottom, rgb(0 0 0 / 0) 0 2px, rgb(0 0 0 / 0.22) 2px 3px),
-      radial-gradient(ellipse at center, transparent 55%, rgb(0 0 0 / 0.55) 100%),
+      repeating-linear-gradient(to bottom, rgb(0 0 0 / 0) 0 2px, rgb(0 0 0 / 0.12) 2px 3px),
+      radial-gradient(ellipse at center, transparent 60%, rgb(0 0 0 / 0.45) 100%),
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.07'/%3E%3C/svg%3E");
   }
 
@@ -231,6 +234,16 @@
     animation-direction: reverse;
   }
 
+  /* One orchestrated moment: the hero wordmark glitches in once on load. */
+  .glitch-intro {
+    @media (prefers-reduced-motion: no-preference) {
+      animation: glitch-in 1.1s steps(1, end) both;
+      &::before, &::after {
+        animation: glitch-slice 0.35s steps(1, end) 3, glitch-fade 1.1s steps(1, end) both;
+      }
+    }
+  }
+
   .pulse-amber {
     @media (prefers-reduced-motion: no-preference) {
       animation: pulse-amber 2.4s ease-in-out infinite;
@@ -257,13 +270,52 @@
 
   .ticker-track {
     @media (prefers-reduced-motion: no-preference) {
-      animation: ticker 40s linear infinite;
+      animation: ticker 60s linear infinite;
     }
   }
 
   .outline-text {
     color: transparent;
     -webkit-text-stroke: 1px rgb(225 6 0 / 0.55);
+  }
+
+  /* Small field labels above values. */
+  .label {
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: var(--color-ash);
+  }
+
+  .code {
+    white-space: pre;
+    font-size: 0.8125rem;
+    line-height: 1.75;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media print {
+  .crt::after,
+  .halftone::before,
+  .no-print {
+    display: none !important;
+  }
+  :root {
+    --background: #fff;
+    --foreground: #111;
+    --border: #ccc;
+  }
+  body {
+    background: #fff;
+    color: #111;
+  }
+  .panel {
+    background: #fff;
+    clip-path: none;
+    break-inside: avoid;
+  }
+  .text-bone, .text-bone\/80, .text-bone\/85, .text-bone\/90, .text-phosphor {
+    color: #111 !important;
   }
 }
 
@@ -274,6 +326,17 @@
   60% { clip-path: inset(12% 0 64% 0); }
   80% { clip-path: inset(55% 0 22% 0); }
   100% { clip-path: inset(0 0 72% 0); }
+}
+@keyframes glitch-in {
+  0% { opacity: 0; translate: -6px 0; }
+  15% { opacity: 1; translate: 4px 0; }
+  30% { translate: -2px 0; clip-path: inset(30% 0 40% 0); }
+  45% { translate: 0 0; clip-path: none; }
+  100% { opacity: 1; translate: 0 0; }
+}
+@keyframes glitch-fade {
+  0%, 90% { opacity: 0.85; }
+  100% { opacity: 0; }
 }
 @keyframes pulse-amber {
   50% { opacity: 0.55; }

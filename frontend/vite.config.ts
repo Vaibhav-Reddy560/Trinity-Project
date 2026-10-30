@@ -11,5 +11,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: { '/api': 'http://localhost:8000' },
+    // The UI imports target_app/harness/cases.json from outside frontend/.
+    fs: { allow: ['..'] },
   },
 })

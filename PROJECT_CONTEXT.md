@@ -31,8 +31,8 @@ Target: `Commando-X/vuln-bank`, pinned at commit `4bb7cd5`, snapshot in `target_
 ### Golden path (auto-patch + verify)
 | Type | CWE | PoC (from SCOPE.md) | Patch intent (LibCST) | Security check | Regression check |
 |---|---|---|---|---|---|
-| `AI_PROMPT_INJECTION` | CWE-77, CWE-20 | PI-1, PI-2 | Insert an input guard at the top of `chat()` that returns a safe canned refusal on injection patterns. Remove the `or self._is_prompt_injection_request(...)` DB-access grant. Wrap user text in `<user_input>` delimiters. | PI-1 and PI-2: attacker text never reaches the LLM, and no user-table dump | REG-1 returns a normal reply |
-| `AI_BROKEN_AUTH` | CWE-862 | BA-1 | In `_get_database_context()`, deny (return `""`, log FORBIDDEN) any lookup whose rows belong to an account other than `user_context["account_number"]`. Anonymous requests get no DB context. | BA-1: bob's data is absent from prompt and response | REG-2: alice still sees her own row |
+| `AI_PROMPT_INJECTION` | CWE-77, CWE-20 | PI-1, PI-2 | Add an input guard at the top of `chat()`: an instruction-override regex (`PATCHPROOF_INJECTION_PATTERN`) that returns a safe canned refusal. It deliberately does not reuse upstream's keyword list, which flags innocent words like "ignore". Remove the `or self._is_prompt_injection_request(...)` DB-access grant. Wrap user text in `<user_input>` delimiters. | PI-1 and PI-2: attacker text never reaches the LLM, and no user-table dump | REG-1 and REG-4 get normal replies (REG-4 contains the word "ignore") |
+| `AI_BROKEN_AUTH` | CWE-862 | BA-1, BA-2 | In `_get_database_context()`, anonymous chats get no DB context. Every query result is filtered to rows containing `user_context["account_number"]`, and withheld rows are logged as FORBIDDEN. | BA-1 (bob's balance) and BA-2 (other customers' transfers) are absent from the prompt and the reply | REG-2 (own balance) and REG-3 (own transfers) still work |
 
 ### Scanner-only (detected and reported, `patchable: false`)
 `AI_INFO_DISCLOSURE` (stretch: patchable), `AI_ROLE_OVERRIDE`, `HARDCODED_CREDENTIALS`, `VERBOSE_ERROR_DISCLOSURE`.
@@ -89,10 +89,17 @@ Exact record shape. Python mirror: `engine/models.py` (`Vuln`). TypeScript mirro
 
 `LogLine` = `{"ts": "<ISO-8601>", "level": "<level>", "msg": "<text>"}`
 
+`msg` conventions, which the UI relies on:
+- **First line** is a one-sentence headline, such as `Bob's account 4001000022 and balance 98,310.00 shown to alice`. `ERROR` headlines in `poc_log` are shown as "What the exploit proved", so state the leak plainly.
+- **Optional further lines** (after `\n`) carry captured evidence, such as an excerpt of the prompt sent to the model or the assistant's reply. The UI shows them collapsed under "Captured context", with 10-digit account numbers highlighted. Keep excerpts under about 15 lines.
+- **Name the case** at the start of step lines (`PI-1 as alice: "..."`, `REG-2 ...`). Case IDs come from `target_app/SCOPE.md`.
+
 ### State machine (enforced by the backend)
 ```
 scan    -> creates OPEN / NOT_RUN / NOT_RUN
-poc     -> any state            -> poc_status = EXPLOITABLE | BLOCKED
+poc     -> patchable only       -> poc_status = EXPLOITABLE | BLOCKED
+           unpatched: replaces poc_log (security cases + a regression baseline)
+           patched (diff set): appends the replay to verification_log; poc_log keeps the original pre-patch evidence
 patch   -> requires poc_status == EXPLOITABLE and patchable -> status = PATCHED (or FAILED if the transform fails)
 verify  -> requires status == PATCHED
            security_blocked and regression_passed -> status VERIFIED, poc_status BLOCKED, regression_status PASSED
@@ -105,7 +112,7 @@ A rejected transition returns **409**.
 | Method | Path | Success response | Errors |
 |---|---|---|---|
 | GET | `/` (no prefix) | `200 {"status": "PatchProof API Online"}` | — |
-| GET | `/api/v1/health` | `200 {"status": "ok"}` | — |
+| GET | `/api/v1/health` | `200 {"status": "ok", "busy": false, "action": null}`. While a job runs: `busy: true` and `action` holds the action name (`"run-all"`, `"poc"`, ...). | — |
 | GET | `/api/v1/vulns` | `200 {"vulns": [Vuln, ...]}` sorted by severity, then `line_number` | — |
 | GET | `/api/v1/vulns/{vuln_id}` | `200 Vuln` | 404 |
 | POST | `/api/v1/scan` | `202 {"accepted": true, "action": "scan"}` | — |
@@ -115,7 +122,11 @@ A rejected transition returns **409**.
 | POST | `/api/v1/run-all` | `202 {"accepted": true, "action": "run-all"}`. Runs scan, then poc, patch and verify for every patchable vuln, in order. | — |
 | POST | `/api/v1/reset` | `202 {"accepted": true, "action": "reset"}` | — |
 
-Errors use FastAPI's default `{"detail": "<human readable>"}`. All POST work runs in `BackgroundTasks`, so the response returns immediately. The frontend polls `GET /api/v1/vulns` every 1s while any action is in flight, and stops once nothing has changed for 3 polls.
+Errors use FastAPI's default `{"detail": "<human readable>"}`. All POST work runs in `BackgroundTasks`, so the response returns immediately.
+- **One job at a time.** A POST arriving while a job runs gets **409** `"Another action (...) is still running"`.
+- **Frontend polling.** The frontend polls `GET /api/v1/vulns` and `GET /api/v1/health` every 0.7s after an action, and stops when `busy` is false.
+- **Stable IDs.** Finding IDs are `"vuln_" + sha1("<file_path>:<type>")[:6]`, so they survive reset and rescan.
+- **Rescans.** A rescan inserts only new findings. Existing records keep their pipeline state.
 
 ## 8. Engine Function Contracts (`engine/`, pure Python)
 Typed in `engine/models.py`. The backend calls **only** these four functions.
@@ -135,7 +146,7 @@ Mood: **red-on-black cyber-noir**. Think CRT bloom, halftone dot screens, PCB tr
 ### Fonts: exactly three, strict roles, no others
 | Token | Font | Use for | Never use for |
 |---|---|---|---|
-| `font-logo` | **Vintage Glitch** | the project name `PATCHPROOF`, the text part of the logo, **only** inside `<Logo/>` | anything else, ever |
+| `font-logo` | **Vintage Glitch** | the project name `PATCHPROOF`, the text part of the logo, **only** via `components/Logo.tsx` (`<Logo/>` in the sidebar, `<Wordmark/>` as the Overview hero title) | anything else, ever |
 | `font-heading` | **Moonhouse** | headlines and section titles | body text |
 | `font-body` | **Technor** (variable 200-900) | all body text, including labels, buttons, code, diffs and terminal logs | — |
 

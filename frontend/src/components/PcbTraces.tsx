@@ -16,7 +16,7 @@ export function PcbTraces() {
     <svg
       aria-hidden
       viewBox="0 0 640 640"
-      className="pointer-events-none fixed bottom-0 left-0 -z-10 h-[70vh] w-auto opacity-60"
+      className="pointer-events-none fixed right-0 bottom-0 -z-10 h-[60vh] w-auto -scale-x-100 opacity-40"
       preserveAspectRatio="xMinYMax meet"
     >
       <g fill="none" stroke="var(--color-blood-800)" strokeWidth="2">

@@ -1,8 +1,9 @@
 import { mockApi } from '@/mocks/mockApi'
-import type { Accepted, Vuln } from './types'
+import type { Accepted, Health, Vuln } from './types'
 
 // The only way the UI talks to the backend. Endpoints: PROJECT_CONTEXT.md §7.
-export const USE_MOCKS = import.meta.env.VITE_USE_MOCKS !== 'false'
+// Live API by default; set VITE_USE_MOCKS=true to run on in-memory sample data.
+export const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true'
 
 export class ApiError extends Error {
   readonly status: number
@@ -12,18 +13,26 @@ export class ApiError extends Error {
   }
 }
 
+const OFFLINE = 'Cannot reach the PatchProof API on port 8000. Start it with `make api`.'
+
 async function request<T>(path: string, method: 'GET' | 'POST' = 'GET'): Promise<T> {
-  const res = await fetch(`/api/v1${path}`, { method })
+  let res: Response
+  try {
+    res = await fetch(`/api/v1${path}`, { method })
+  } catch {
+    throw new ApiError(0, OFFLINE)
+  }
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new ApiError(res.status, body.detail ?? res.statusText)
+    const body = await res.json().catch(() => null)
+    if (!body?.detail && res.status >= 500) throw new ApiError(res.status, OFFLINE)
+    throw new ApiError(res.status, body?.detail ?? res.statusText)
   }
   return res.json()
 }
 
 const liveApi = {
   mode: 'live' as const,
-  health: () => request<{ status: string }>('/health'),
+  health: () => request<Health>('/health'),
   listVulns: () => request<{ vulns: Vuln[] }>('/vulns'),
   getVuln: (id: string) => request<Vuln>(`/vulns/${id}`),
   scan: () => request<Accepted>('/scan', 'POST'),

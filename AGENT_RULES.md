@@ -32,7 +32,7 @@ Exceptions:
 - Network calls from the PoC harness or the engine. The harness stays **offline and deterministic**. No real DeepSeek or OpenAI calls.
 - Real personal data. All data is synthetic (`target_app/harness/fixtures.json`).
 - Committing secrets, `.env` files, `backend/data/`, `node_modules/`, or the font source packs.
-- Adding any font beyond the three in `PROJECT_CONTEXT.md` §9 (no monospace, Google Fonts or `@fontsource`). Technor is the body font for everything, including code and logs. Moonhouse is for headlines. Vintage Glitch is only for the project name inside `<Logo/>`.
+- Adding any font beyond the three in `PROJECT_CONTEXT.md` §9 (no monospace, Google Fonts or `@fontsource`). Technor is the body font for everything, including code and logs. Moonhouse is for headlines. Vintage Glitch is only for the project name, and only inside `frontend/src/components/Logo.tsx` (`<Logo/>`, `<Wordmark/>`).
 
 ## 5. Workflow and Handoffs
 1. Pick or claim a task in `TASKS.md`: set yourself as Owner and the status to `IN_PROGRESS`.
@@ -47,6 +47,7 @@ Exceptions:
    - use small commits with prefixes `engine:`, `backend:`, `frontend:` or `docs:`
    - `git pull --rebase` before every push
    - never force-push `main`
+   - **no AI attribution, ever:** no `Co-Authored-By: Claude` (or any AI) trailer in commit messages, and no "Generated with ..." line in PR descriptions
 6. Tests live next to their domain: `engine/tests/`, `backend/tests/`. Every engine transformer gets a test that runs it on the pristine file and asserts the expected diff.
 
 ## 6. Quick Commands (repo root)
