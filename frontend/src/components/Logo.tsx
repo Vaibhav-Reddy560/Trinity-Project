@@ -17,7 +17,7 @@ export function LogoMark({ className }: { className?: string }) {
 
 export function Wordmark({ className, intro }: { className?: string; intro?: boolean }) {
   return (
-    <span data-text="PATCHPROOF" className={cn('glitch font-logo leading-none tracking-wide text-ember text-glow', intro && 'glitch-intro', className)}>
+    <span data-text="PATCHPROOF" className={cn('glitch wordmark font-logo leading-none tracking-wide', intro && 'glitch-intro', className)}>
       PATCHPROOF
     </span>
   )
@@ -27,7 +27,7 @@ export function Logo({ className }: { className?: string }) {
   return (
     <a href={href.overview} className={cn('group inline-flex items-center gap-3 outline-offset-4', className)} aria-label="PatchProof overview">
       <LogoMark className="size-11" />
-      <Wordmark className="text-[2.6rem]" />
+      <Wordmark className="wordmark-bright text-[2.6rem]" />
     </a>
   )
 }
