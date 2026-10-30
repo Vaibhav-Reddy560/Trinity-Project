@@ -20,7 +20,7 @@ export function LogoMark({ className, large, intro }: { className?: string; larg
 
 export function Wordmark({ className, intro }: { className?: string; intro?: boolean }) {
   return (
-    <span data-text="PATCHPROOF" className={cn('glitch wordmark font-logo leading-none tracking-wide', intro && 'glitch-intro', className)}>
+    <span data-text="PATCHPROOF" className={cn('glitch wordmark font-logo leading-none tracking-[0.06em]', intro && 'glitch-intro', className)}>
       PATCHPROOF
     </span>
   )

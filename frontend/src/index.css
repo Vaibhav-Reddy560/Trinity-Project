@@ -400,7 +400,7 @@
   /* Layered scanner rings. Each layer is its own SVG so they can split apart in 3D. */
   .boot-stack {
     position: relative;
-    width: min(17rem, 70vw);
+    width: min(clamp(15rem, 36vh, 22rem), 72vw);
     aspect-ratio: 1;
     perspective: 1100px;
     @media (prefers-reduced-motion: no-preference) {

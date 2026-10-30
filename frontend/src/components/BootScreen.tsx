@@ -93,33 +93,42 @@ export function BootScreen({ ready, onDone }: { ready: boolean; onDone: () => vo
 
   return (
     <div className={cn('boot', exiting && 'boot-exit')} onClick={() => setExiting(true)} role="status" aria-live="polite" aria-label="Loading PatchProof">
-      <div className="relative z-10 flex w-full max-w-sm flex-col items-center">
+      {/* One vertical rhythm, scaled to the viewport height so it fills large screens
+          and still fits short ones. The logo is sized to match the tagline's width. */}
+      <div className="relative z-10 flex w-full max-w-xl flex-col items-center">
         <ScannerRings />
 
-        <div className="mt-8 flex h-[4.5rem] items-center justify-center">
-          {showMark && <Lockup intro className="gap-3" markClass="h-[clamp(2rem,7vw,2.8rem)]" textClass="text-[clamp(2.6rem,9vw,3.6rem)]" />}
+        {/* Reserves the logo's height so nothing jumps when it glitches in. */}
+        <div className="mt-[clamp(1.5rem,4.5vh,3rem)] flex h-[clamp(3rem,min(10vh,19vw),6rem)] items-center justify-center">
+          {showMark && (
+            <Lockup intro className="gap-[clamp(0.6rem,1.4vh,1rem)]"
+              markClass="h-[clamp(2.35rem,min(7.8vh,14.8vw),4.7rem)]" textClass="text-[clamp(3rem,min(10vh,19vw),6rem)]" />
+          )}
         </div>
-        <p className="boot-rise mt-2 font-heading text-xs tracking-[0.2em] text-bone/80 uppercase" style={{ animationDelay: '1.2s' }}>
+        <p className="boot-rise mt-[clamp(0.6rem,1.6vh,1rem)] font-heading text-[clamp(0.66rem,1.25vh,0.82rem)] tracking-[0.18em] text-bone/85 uppercase"
+          style={{ animationDelay: '1.2s' }}>
           Find the flaw. Prove the fix.
         </p>
 
-        <ol className="mt-7 w-full max-w-[19rem] space-y-1.5 text-xs text-ash">
-          {lines.map((l, i) => (
-            <li key={l} className="line-in flex gap-2" style={{ animationDelay: `${250 + i * LINE_GAP_MS}ms` }}>
+        <div className="mt-[clamp(1.5rem,4vh,2.5rem)] w-full max-w-[24rem]">
+          <ol className="space-y-2 text-sm text-ash">
+            {lines.map((l, i) => (
+              <li key={l} className="line-in flex gap-2.5" style={{ animationDelay: `${250 + i * LINE_GAP_MS}ms` }}>
+                <span aria-hidden className="text-signal">&gt;</span>
+                {l}
+              </li>
+            ))}
+            <li className={cn('flex gap-2.5 text-phosphor', done ? 'line-in' : 'invisible')}>
               <span aria-hidden className="text-signal">&gt;</span>
-              {l}
+              Ready
+              <span aria-hidden className="type-cursor" />
             </li>
-          ))}
-          <li className={cn('flex gap-2 text-phosphor', done ? 'line-in' : 'invisible')}>
-            <span aria-hidden className="text-signal">&gt;</span>
-            Ready
-            <span aria-hidden className="type-cursor" />
-          </li>
-        </ol>
-
-        <div className="boot-bar mt-5 w-full max-w-[19rem]"><span /></div>
-        <p className="mt-6 text-[0.6875rem] text-ash/60">Press any key to skip</p>
+          </ol>
+          <div className="boot-bar mt-5 w-full"><span /></div>
+        </div>
       </div>
+
+      <p className="absolute bottom-[clamp(1rem,3vh,2rem)] left-1/2 z-10 -translate-x-1/2 text-xs text-ash/60">Press any key to skip</p>
     </div>
   )
 }
