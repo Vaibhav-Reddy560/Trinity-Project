@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
-import { CASES, TARGET } from '@/lib/scope'
+import { targetLabel } from '@/lib/scope'
+import { useActiveTarget } from '@/lib/targetContext'
 import { cn } from '@/lib/utils'
 import { Lockup } from './Logo'
 
@@ -51,6 +52,7 @@ function ScannerRings() {
 const LINE_GAP_MS = 260
 
 export function BootScreen({ ready, onDone }: { ready: boolean; onDone: () => void }) {
+  const target = useActiveTarget()
   const reduced = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, [])
   const minMs = reduced ? 500 : 2100
   const [minElapsed, setMinElapsed] = useState(false)
@@ -86,9 +88,11 @@ export function BootScreen({ ready, onDone }: { ready: boolean; onDone: () => vo
 
   const lines = [
     'Initialising PatchProof console',
-    'Loading detection rules',
-    `Mounting offline exploit harness (${CASES.length} cases)`,
-    `Target ${TARGET.name} at ${TARGET.commit}`,
+    'Loading detection rules: AI and generic packs',
+    target.provable
+      ? `Mounting offline exploit harness (${target.cases?.length ?? 0} cases)`
+      : 'Project mode: code is read, never run; fixes go to a copy',
+    `Target ${targetLabel(target)}`,
   ]
 
   return (

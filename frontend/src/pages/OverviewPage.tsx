@@ -1,4 +1,4 @@
-import { ArrowRight, Bug, ChevronRight, FileText, Play, ScanSearch } from 'lucide-react'
+import { ArrowRight, Bug, ChevronRight, Crosshair, FileText, Play, ScanSearch } from 'lucide-react'
 import { Highlight, headline, levelIcon, levelTone } from '@/components/EvidenceLog'
 import { Lockup } from '@/components/Logo'
 import { Panel } from '@/components/Panel'
@@ -9,13 +9,17 @@ import type { Pending } from '@/hooks/useVulns'
 import { activityOf } from '@/lib/activity'
 import { SEVERITIES, ago, severityColor, severityLabel, typeName } from '@/lib/format'
 import { nextAction, summarize, verdictFor, type StepAction } from '@/lib/pipeline'
+import { aiName, useAI } from '@/lib/aiContext'
 import { href } from '@/lib/router'
-import { TARGET } from '@/lib/scope'
+import { targetLabel } from '@/lib/scope'
+import { useActiveTarget } from '@/lib/targetContext'
 import type { Action, Vuln } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { EmptyFindings } from './EmptyFindings'
 
-const stepLabel: Record<StepAction, string> = { poc: 'Run exploit', patch: 'Apply patch', verify: 'Verify fix' }
+const stepLabel = (v: Vuln, step: StepAction) =>
+  step === 'poc' ? 'Run exploit' : step === 'verify' ? (v.provable ? 'Verify fix' : 'Run checks') : v.fixer === 'ai' ? 'Generate AI fix' : 'Apply patch'
+const ATTENTION_SHOWN = 8
 
 export function OverviewPage({ vulns, pending, onRun }: {
   vulns: Vuln[]
@@ -25,10 +29,13 @@ export function OverviewPage({ vulns, pending, onRun }: {
   const s = summarize(vulns)
   const ratio = (n: number) => (s.patchable ? n / s.patchable : 0)
   const attention = vulns.filter((v) => nextAction(v) !== null || v.status === 'FAILED')
+  const ai = useAI()
   const recent = activityOf(vulns).slice(0, 6)
   const lastScan = vulns.reduce<string | null>((m, v) => (!m || v.created_at > m ? v.created_at : m), null)
 
   const allVerified = s.patchable > 0 && s.verified === s.patchable
+  const target = useActiveTarget()
+  const isProject = target.kind === 'project'
   const busy = pending !== null
 
   return (
@@ -57,29 +64,33 @@ export function OverviewPage({ vulns, pending, onRun }: {
             </h1>
             <p className="mt-5 font-heading text-base tracking-[0.14em] text-bone uppercase md:text-xl">Find the flaw. Prove the fix.</p>
             <p className="mt-4 max-w-[62ch] text-base leading-relaxed text-bone/80">
-              PatchProof scans the {TARGET.module} module of {TARGET.name}, proves each weakness with a live exploit, patches the code and verifies that the exploit is blocked while normal use still works.
+              {isProject
+                ? <>PatchProof is checking <span className="text-bone">{target.name}</span> without ever running it: each weakness is located to the exact lines, fixed in a copy by a rule{ai.enabled ? ` or by ${aiName(ai)}` : ''}, and every fix is proven by static checks before it counts.</>
+                : <>PatchProof finds weaknesses in any Python project and fixes them{ai.enabled ? ` with rules or ${aiName(ai)}` : ''}. On this practice target, <span className="text-bone">{target.name}</span>, it also proves each one with a live exploit, and a fix only counts when the exploit is blocked and normal use still works.</>}
             </p>
             <div className="mt-7 flex flex-wrap gap-2">
               {vulns.length === 0 ? (
                 <Button size="lg" disabled={busy} onClick={() => onRun('scan')} className="shadow-[var(--glow-signal)]"><ScanSearch /> Scan target</Button>
-              ) : allVerified ? (
+              ) : allVerified || s.patchable === 0 ? (
                 <Button size="lg" asChild className="shadow-[var(--glow-signal)]"><a href={href.report}><FileText /> View report</a></Button>
               ) : (
                 <Button size="lg" disabled={busy} onClick={() => onRun('run-all')} className="shadow-[var(--glow-signal)]"><Play /> Run full pipeline</Button>
               )}
               <Button size="lg" variant="outline" asChild><a href={href.findings}><Bug /> Open findings</a></Button>
+              <Button size="lg" variant="outline" asChild><a href={href.scope}><Crosshair /> {isProject ? 'Change target' : 'Scan your own project'}</a></Button>
             </div>
           </div>
 
           <div className="relative border border-border bg-void/70 p-5 backdrop-blur">
-            <span className="sticker absolute -top-3 right-4">Synthetic data</span>
+            <span className="sticker absolute -top-3 right-4">{isProject ? 'Read only' : 'Synthetic data'}</span>
             <dl className="space-y-3 text-sm">
-              <div><dt className="label">Target</dt><dd className="mt-0.5 text-bone">{TARGET.name} at commit {TARGET.commit}</dd></div>
-              <div><dt className="label">Module under test</dt><dd className="mt-0.5 text-bone">{TARGET.module}</dd></div>
-              <div><dt className="label">Patch target</dt><dd className="mt-0.5 text-bone">ai_agent_deepseek.py</dd></div>
-              <div><dt className="label">Exploits run</dt><dd className="mt-0.5 text-bone">Offline, against an isolated copy</dd></div>
+              <div><dt className="label">Target</dt><dd className="mt-0.5 break-words text-bone">{targetLabel(target)}</dd></div>
+              <div><dt className="label">Under test</dt><dd className="mt-0.5 text-bone">{target.module}</dd></div>
+              <div><dt className="label">Mode</dt><dd className="mt-0.5 text-bone">{isProject ? 'Find, fix in a copy, prove by checks' : 'Find, prove, patch, verify'}</dd></div>
+              <div><dt className="label">Exploits run</dt><dd className="mt-0.5 text-bone">{isProject ? 'Never: your code is not executed' : 'Offline, against an isolated copy'}</dd></div>
+              <div><dt className="label">AI assist</dt><dd className="mt-0.5 text-bone">{ai.enabled ? 'On: deep scan, reviews and fixes' : 'Off: rules only'}</dd></div>
             </dl>
-            <a href={href.scope} className="mt-4 inline-flex items-center gap-1 text-sm text-ember hover:underline">See full scope <ArrowRight className="size-3.5" /></a>
+            <a href={href.scope} className="mt-4 inline-flex items-center gap-1 text-sm text-ember hover:underline">Change target <ArrowRight className="size-3.5" /></a>
           </div>
         </div>
       </section>
@@ -91,15 +102,15 @@ export function OverviewPage({ vulns, pending, onRun }: {
         <div className="grid grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
           <Panel title="Progress" aside={lastScan && <span className="whitespace-nowrap">Scanned {ago(lastScan)}</span>}>
             <PipelineRing
-              label={`${s.verified} of ${s.patchable} patchable findings verified`}
+              label={`${s.verified} of ${s.patchable} fixable findings verified`}
               title={`${s.verified} / ${s.patchable}`}
-              subline="patchable findings fixed and verified"
+              subline="fixable findings fixed and verified"
               titleClass={s.verified === s.patchable && s.patchable > 0 ? 'text-phosphor text-glow-hot' : 'text-bone'}
               hot={s.verified === s.patchable && s.patchable > 0}
               busy={pending !== null}
               segments={[
                 { label: 'Scan', fill: s.total ? 1 : 0, tone: 'signal' },
-                { label: 'Prove', fill: ratio(s.proven), tone: s.exploitable ? 'amber' : 'signal', pulse: s.exploitable > 0 },
+                { label: 'Prove', fill: s.provable ? s.proven / s.provable : 0, tone: s.exploitable ? 'amber' : 'signal', pulse: s.exploitable > 0 },
                 { label: 'Patch', fill: ratio(s.patched), tone: 'signal' },
                 { label: 'Verify', fill: ratio(s.verified), tone: 'hot' },
               ]}
@@ -110,10 +121,10 @@ export function OverviewPage({ vulns, pending, onRun }: {
             <Panel title="Results" className="flex-1">
               <ol className="grid grid-cols-2 gap-px bg-border md:grid-cols-4">
                 {[
-                  { n: s.total, label: 'Weaknesses found', note: `${s.reportOnly} reported only` },
-                  { n: s.exploitable, label: 'Proven exploitable', note: 'Exploit reproduced, not yet fixed' },
-                  { n: s.patched, label: 'Patched', note: `of ${s.patchable} patchable` },
-                  { n: s.verified, label: 'Verified fixed', note: 'Exploit blocked, behaviour intact' },
+                  { n: s.total, label: 'Weaknesses found', note: s.byAI ? `${s.byAI} by the AI deep scan` : `${s.reportOnly} to fix by hand` },
+                  { n: s.exploitable, label: 'Proven exploitable', note: isProject ? 'Never run on your code' : 'Exploit reproduced, not yet fixed' },
+                  { n: s.patched, label: 'Patched', note: `of ${s.patchable} fixable${s.aiFixes ? `, ${s.aiFixes} by AI` : ''}` },
+                  { n: s.verified, label: 'Verified fixed', note: 'Every proof check passed' },
                 ].map((m, i) => (
                   <li key={m.label} className="relative bg-panel p-4">
                     <p className="font-heading text-[2.25rem] leading-none text-bone tabular-nums">{m.n}</p>
@@ -148,10 +159,10 @@ export function OverviewPage({ vulns, pending, onRun }: {
         <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 xl:grid-cols-2">
           <Panel title="Needs attention" aside={<span>{attention.length} waiting</span>} bodyClassName="p-0">
             {attention.length === 0 ? (
-              <p className="p-5 text-sm text-ash">Nothing is waiting. Every patchable finding is fixed and verified.</p>
+              <p className="p-5 text-sm text-ash">Nothing is waiting. Every fixable finding is fixed and verified.</p>
             ) : (
               <ul className="divide-y divide-border">
-                {attention.map((v) => {
+                {attention.slice(0, ATTENTION_SHOWN).map((v) => {
                   const step = nextAction(v)
                   return (
                     <li key={v.id} className="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4">
@@ -165,12 +176,17 @@ export function OverviewPage({ vulns, pending, onRun }: {
                       </div>
                       {step && (
                         <Button size="lg" variant={step === 'poc' ? 'outline' : 'default'} disabled={pending !== null} onClick={() => onRun(step, v.id)}>
-                          {stepLabel[step]}
+                          {stepLabel(v, step)}
                         </Button>
                       )}
                     </li>
                   )
                 })}
+                {attention.length > ATTENTION_SHOWN && (
+                  <li className="px-5 py-3 text-sm">
+                    <a href={href.findings} className="text-ember hover:underline">{attention.length - ATTENTION_SHOWN} more on the Findings page</a>
+                  </li>
+                )}
               </ul>
             )}
           </Panel>

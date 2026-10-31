@@ -1,11 +1,15 @@
-"""Runs harness cases in isolated subprocesses and judges them from recorded evidence.
+"""Runs a target's cases in isolated subprocesses and judges them from recorded evidence.
 
-A case's output (from target_app/harness/run_case.py) records every prompt sent to the
-model and every database query. Verdicts come from that evidence, never from how the
-model's reply "sounds".
+Two harness kinds, chosen by the target profile:
+- "vuln-bank-agent" (run_case.py): records every prompt sent to the model and every database
+  query; verdicts come from that evidence, never from how the model's reply "sounds".
+- "function-call" (run_call.py): calls one function of a curated fixture; a security case is
+  exploited if a protected marker comes back, a regression case passes if expected markers do.
+Only curated targets shipped in this repo have a harness; user projects are never executed.
 """
 
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -13,9 +17,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from engine.models import LogLine
+from engine.targets import cases_for_profile, harness_env, load_profile
 
 HARNESS_DIR = Path(__file__).resolve().parents[1] / "target_app" / "harness"
 RUN_CASE = HARNESS_DIR / "run_case.py"
+RUN_CALL = HARNESS_DIR / "run_call.py"
 CASE_TIMEOUT_S = 30
 SYSTEM_PROMPT_MARKER = "You are a helpful banking customer support agent"
 MAX_EXCERPT_LINES = 14
@@ -23,7 +29,6 @@ MAX_EXCERPT_LINES = 14
 _FIXTURES = json.loads((HARNESS_DIR / "fixtures.json").read_text())
 USERS: list[dict] = _FIXTURES["users"]
 TRANSACTIONS: list[dict] = _FIXTURES["transactions"]
-CASES: list[dict] = json.loads((HARNESS_DIR / "cases.json").read_text())["cases"]
 
 
 def now() -> str:
@@ -34,22 +39,38 @@ def log(level: str, msg: str) -> LogLine:
     return {"ts": now(), "level": level, "msg": msg}  # type: ignore[typeddict-item]
 
 
-def cases_for(vuln_type: str, kind: str | None = None) -> list[dict]:
-    return [c for c in CASES if vuln_type in c["types"] and (kind is None or c["kind"] == kind)]
+def cases_for(vuln_type: str, kind: str | None = None, profile: dict | None = None) -> list[dict]:
+    cases = cases_for_profile(profile or load_profile())
+    return [c for c in cases if vuln_type in c["types"] and (kind is None or c["kind"] == kind)]
+
+
+def regression_cases(profile: dict) -> list[dict]:
+    """The target's whole regression suite. Every fix runs all of it, not only the cases for its own type."""
+    return [c for c in cases_for_profile(profile) if c["kind"] == "regression"]
+
+
+def _run(cmd: list[str], env: dict[str, str] | None = None) -> dict:
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=CASE_TIMEOUT_S, env={**os.environ, **env} if env else None)
+    except subprocess.TimeoutExpired:
+        return {"error": f"timed out after {CASE_TIMEOUT_S}s", "harness_error": True}
+    if proc.returncode != 0:
+        tail = proc.stderr.strip().splitlines()
+        return {"error": tail[-1] if tail else f"exit code {proc.returncode}", "harness_error": True}
+    return json.loads(proc.stdout)
 
 
 def run_case(workspace: str, case: dict) -> dict:
     cmd = [sys.executable, "-I", str(RUN_CASE), "--workspace", workspace, "--message", case["message"]]
     if case["user"] != "anonymous":
         cmd += ["--user", case["user"]]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=CASE_TIMEOUT_S)
-    except subprocess.TimeoutExpired:
-        return {"error": f"timed out after {CASE_TIMEOUT_S}s"}
-    if proc.returncode != 0:
-        tail = proc.stderr.strip().splitlines()
-        return {"error": tail[-1] if tail else f"exit code {proc.returncode}"}
-    return json.loads(proc.stdout)
+    return _run(cmd)
+
+
+def run_call(workspace: str, case: dict, env: dict[str, str] | None = None) -> dict:
+    call = case["call"]
+    return _run([sys.executable, "-I", str(RUN_CALL), "--workspace", workspace, "--module", call["module"],
+                 "--function", call["function"], "--kwargs", json.dumps(call.get("kwargs", {}))], env)
 
 
 def compact(text: str) -> list[str]:
@@ -192,7 +213,39 @@ def judge(case: dict, out: dict) -> Verdict:
 
 def describe(case: dict, suffix: str = "") -> str:
     who = "anonymous" if case["user"] == "anonymous" else case["user"]
-    return f'{case["id"]} as {who}: "{case["message"]}"{suffix}'
+    shown = case["message"] if "call" in case else f'"{case["message"]}"'
+    return f'{case["id"]} as {who}: {shown}{suffix}'
+
+
+def judge_call(case: dict, out: dict) -> Verdict:
+    """Function-call cases: evidence is the value the function returned (or the error it raised)."""
+    if out.get("harness_error"):
+        return Verdict(True, f"{case['id']} could not run: {out['error']}")
+    text = json.dumps(out.get("output"), default=str)
+    error = out.get("error")
+    leaked = [mk for mk in case.get("forbid", []) if mk in text]
+    shown = ["Returned to the caller (excerpt):", *compact(text)[:MAX_EXCERPT_LINES]]
+
+    if case["kind"] == "security":
+        if leaked:
+            return Verdict(True, case["leak"], shown)
+        why = f"refused with {error.split(':', 1)[0]}" if error else "no protected data came back"
+        return Verdict(False, f"{case['id']} blocked: {why}", [f"Raised: {error}"] if error else [])
+
+    missing = [mk for mk in case.get("expect", []) if mk not in text]
+    if error or missing or leaked:
+        why = f"raised {error}" if error else f"protected data appeared ({', '.join(leaked)})" if leaked else f"expected {', '.join(missing)} missing"
+        return Verdict(True, f"{case['id']} failed: {why}")
+    return Verdict(False, f"{case['id']} passed: {case['pass']}")
+
+
+def evaluate(profile: dict, workspace: str, case: dict) -> Verdict:
+    kind = profile["harness"]["kind"]
+    if kind == "vuln-bank-agent":
+        return judge(case, run_case(workspace, case))
+    if kind == "function-call":
+        return judge_call(case, run_call(workspace, case, harness_env(profile)))
+    raise ValueError(f"unknown harness kind {kind!r}")
 
 
 def query_lines(queries: list[dict], level: str = "WARN") -> list[LogLine]:

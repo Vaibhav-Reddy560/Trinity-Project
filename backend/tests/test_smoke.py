@@ -19,4 +19,6 @@ def test_root_online(client):
 
 
 def test_health_reports_idle(client):
-    assert client.get("/api/v1/health").json() == {"status": "ok", "busy": False, "action": None}
+    body = client.get("/api/v1/health").json()
+    assert {k: body[k] for k in ("status", "busy", "action")} == {"status": "ok", "busy": False, "action": None}
+    assert body["ai"]["enabled"] is False and body["ai"]["model"] == "claude-opus-5-5"

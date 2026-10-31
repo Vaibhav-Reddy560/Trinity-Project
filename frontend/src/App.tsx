@@ -9,10 +9,12 @@ import { Toasts } from '@/components/Toasts'
 import { Button } from '@/components/ui/button'
 import { useVulns } from '@/hooks/useVulns'
 import { activityOf } from '@/lib/activity'
+import { AIContext } from '@/lib/aiContext'
 import { typeName } from '@/lib/format'
 import { href, useRoute, type Route } from '@/lib/router'
-import { TARGET } from '@/lib/scope'
-import type { Action } from '@/lib/types'
+import { targetLabel } from '@/lib/scope'
+import { TargetContext } from '@/lib/targetContext'
+import type { Action, TargetSelection } from '@/lib/types'
 import { ActivityPage } from '@/pages/ActivityPage'
 import { FindingPage } from '@/pages/FindingPage'
 import { FindingsPage } from '@/pages/FindingsPage'
@@ -27,22 +29,28 @@ const RUNNING: Record<Action, string> = {
   verify: 'Verifying fix',
   'run-all': 'Running full pipeline',
   reset: 'Resetting workspace',
+  select: 'Loading target and scanning',
+  review: 'AI is reviewing a finding',
+  'review-all': 'AI is reviewing every finding',
+  'deep-scan': 'AI is reading the code for logic flaws',
+  'fix-all': 'Fixing and proving every open finding',
 }
 
 const TITLES: Record<Route['name'], string> = {
   overview: 'Overview',
   findings: 'Findings',
   finding: 'Finding',
-  scope: 'Target & scope',
+  scope: 'Targets',
   activity: 'Activity',
   report: 'Report',
 }
 
 export default function App() {
   const route = useRoute()
-  const { vulns, loaded, apiState, pending, notices, run, reload } = useVulns()
+  const { vulns, loaded, apiState, pending, notices, run, reload, targets, ai } = useVulns()
   const activityCount = useMemo(() => activityOf(vulns).length, [vulns])
   const onRun = (a: Action, id?: string) => void run(a, id)
+  const onSelect = (selection: TargetSelection) => void run('select', undefined, selection)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [booting, setBooting] = useState(true)
 
@@ -64,7 +72,7 @@ export default function App() {
 
   let page: React.ReactNode
   if (!loaded) page = <p className="text-ash">Loading findings…</p>
-  else if (route.name === 'findings') page = <FindingsPage vulns={vulns} pending={pending} onScan={() => onRun('scan')} />
+  else if (route.name === 'findings') page = <FindingsPage vulns={vulns} pending={pending} onRun={onRun} />
   else if (route.name === 'finding') {
     const vuln = vulns.find((v) => v.id === route.id)
     page = vuln ? (
@@ -76,13 +84,14 @@ export default function App() {
         <a href={href.findings} className="mt-5 inline-block text-ember hover:underline">Back to findings</a>
       </section>
     )
-  } else if (route.name === 'scope') page = <ScopePage />
+  } else if (route.name === 'scope') page = <ScopePage pending={pending} apiState={apiState} onSelect={onSelect} />
   else if (route.name === 'activity') page = <ActivityPage vulns={vulns} />
   else if (route.name === 'report') page = <ReportPage vulns={vulns} />
   else page = <OverviewPage vulns={vulns} pending={pending} onRun={onRun} />
 
   return (
-    <>
+    <TargetContext.Provider value={targets}>
+    <AIContext.Provider value={ai}>
     {booting && <BootScreen ready={loaded} onDone={() => setBooting(false)} />}
     <div className="crt halftone relative isolate min-h-dvh" inert={booting}>
       <a href="#main" className="sr-only z-[70] bg-signal px-4 py-2 text-white focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
@@ -104,7 +113,7 @@ export default function App() {
               {pending ? (
                 <><Loader className="spin-scan size-4 text-signal" aria-hidden /><span className="text-bone">{RUNNING[pending.action]}</span></>
               ) : (
-                <>Workspace <span className="text-bone">{TARGET.name}</span> at {TARGET.commit}</>
+                <>Target <a href={href.scope} className="text-bone hover:text-ember">{targetLabel(targets.active)}</a></>
               )}
             </p>
           </div>
@@ -128,6 +137,7 @@ export default function App() {
       <Toasts notices={notices} />
       <CommandPalette open={paletteOpen && !booting} onOpenChange={setPaletteOpen} vulns={vulns} pending={pending} onRun={onRun} />
     </div>
-    </>
+    </AIContext.Provider>
+    </TargetContext.Provider>
   )
 }

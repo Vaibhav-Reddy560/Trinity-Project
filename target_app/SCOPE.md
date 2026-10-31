@@ -1,4 +1,12 @@
-# Target Scope — vuln-bank AI Customer Support
+# Target Scope
+
+PatchProof ships two **practice targets**, each with a profile in `target_app/profiles/`:
+- **vuln-bank** AI customer support (this page, first): the main demo target
+- **notes-api** (end of this page): a second fixture showing that the full loop works beyond vuln-bank
+
+Any other local folder or public Git repository can be scanned as a **project**. Its code is never run. Its Python files are copied to the workspace, fixes are applied to that copy and proven by static checks, and the original folder is never changed. See `PROJECT_CONTEXT.md` §4.
+
+# vuln-bank AI Customer Support
 
 ## Source (pinned)
 - Upstream: https://github.com/Commando-X/vuln-bank (MIT, © 2025 Al-Amir Badmus)
@@ -53,3 +61,47 @@ We do not judge whether an LLM "sounded" compromised. A PoC is **EXPLOITABLE** w
 | REG-3 | regression | "Show my transaction history" (alice) | Own transfers shown | Both of alice's transfers still shown |
 
 The exploit run also records a regression baseline, so the "before" column above is captured evidence, not an assumption.
+
+# notes-api practice fixture
+
+## Source
+- `target_app/fixtures/notes-api/`, written for PatchProof and shipped with it. It is **deliberately vulnerable. Never deploy it.**
+- Profile: `target_app/profiles/notes-api.json`. Rule pack `generic`. Harness `function-call`.
+- The pristine copy is never edited. Patches go to `backend/data/workspace/`, as with vuln-bank.
+
+## In-scope files
+| File | Lines | Role |
+|---|---|---|
+| `notes_app.py` | Whole file | **Scan + PoC + auto-patch + verify.** |
+
+Out of scope:
+- `files/` (public attachments) and `secrets/` (a synthetic key file the exploits try to reach). Both are test data.
+- Authentication: callers pass their user name directly.
+
+## Known weakness sites
+| Type | Where | Why |
+|---|---|---|
+| `SQL_INJECTION` (CWE-89) | `search_notes()`: the SQL is an f-string over `owner` and `query`, then `conn.execute(sql)` | A quote in either value rewrites the query, so other users' notes come back. |
+| `PATH_TRAVERSAL` (CWE-22) | `read_attachment()`: `open(os.path.join(FILES_DIR, name))` | `../` in `name` escapes the attachments folder. |
+| `HARDCODED_CREDENTIALS` (CWE-798) | `ADMIN_TOKEN` | No exploit case. The rule-based fix reads it from the environment, and is proven by the static checks plus the whole regression suite. |
+
+## Harness (`target_app/harness/run_call.py`)
+- Imports `notes_app` **from the workspace** and calls one function with JSON keyword arguments.
+- Runs in a fresh isolated interpreter (`python -I`) inside a temporary working directory.
+- Prints `{"output", "error"}`.
+- Supplies the `env` block from `cases.json` (`ADMIN_TOKEN`, synthetic) to every case, the way a deployment would configure the app. Without it, the token fix would fail closed at import.
+- The app seeds an in-memory SQLite database with synthetic notes for alice, bob and admin. Private notes carry the markers `BOB-PRIVATE` and `ADMIN-PRIVATE`; the secret file carries `SECRET-KEY-`.
+
+A security case is **exploited** when a forbidden marker appears in the output. It is **blocked** when the call refuses (for example with `PermissionError`) or no protected data comes back. A regression case passes when its expected text is present and no forbidden marker is.
+
+## Reference cases (`fixtures/notes-api/cases.json`)
+| Case | Kind | Call (as) | Pristine result | After the fix |
+|---|---|---|---|---|
+| SQLI-1 | security | `search_notes(owner="alice", query="x' OR '1'='1' --")` (alice) | Every note returned, including `BOB-PRIVATE` and `ADMIN-PRIVATE` | Only alice's matching notes. The quotes are plain text. |
+| SQLI-2 | security | `search_notes(owner="alice' OR owner='bob", query="")` (alice) | Bob's notes returned | Nothing: no user has that literal name |
+| REG-1 | regression | `search_notes(owner="alice", query="Groc")` (alice) | Groceries note | Groceries note |
+| PT-1 | security | `read_attachment(name="../secrets/api_keys.txt")` (visitor) | Secret key file read | Refused: the path leaves the folder |
+| PT-2 | security | `read_attachment(name="../notes_app.py")` (visitor) | App source read | Refused |
+| REG-2 | regression | `read_attachment(name="welcome.txt")` (visitor) | Welcome text | Welcome text |
+
+Either fix can be applied first. The path traversal patch inserts a helper near the top of the file, and the SQL patcher finds its site by content, not by line number.

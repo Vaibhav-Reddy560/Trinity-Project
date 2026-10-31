@@ -1,5 +1,6 @@
+import { MOCK_TARGETS } from '@/lib/scope'
 import type { Accepted, Action, Vuln } from '@/lib/types'
-import { EVIDENCE, demoFindings, scannedFindings, stamp } from './vulns'
+import { EVIDENCE, demoFindings, mockChecks, scannedFindings, stamp } from './vulns'
 
 // In-memory stand-in for the backend: same endpoints, same state machine, simulated delays.
 let state: Vuln[] = demoFindings()
@@ -47,8 +48,9 @@ function doPoc(id: string) {
 }
 
 function doPatch(id: string) {
-  const ev = EVIDENCE[find(id).type]!
-  update(id, { status: 'PATCHED', diff: ev.diff, patch_rationale: ev.rationale })
+  const v = find(id)
+  const ev = EVIDENCE[v.type]!
+  update(id, { status: 'PATCHED', diff: ev.diff, patch_rationale: ev.rationale, fix_source: 'rule', checks: mockChecks(v, false) })
 }
 
 function doVerify(id: string) {
@@ -57,15 +59,36 @@ function doVerify(id: string) {
     status: 'VERIFIED',
     poc_status: 'BLOCKED',
     regression_status: 'PASSED',
+    checks: mockChecks(find(id), true),
     verification_log: stamp(ev.verify, Date.now()),
   })
 }
 
 export const mockApi = {
   mode: 'mock' as const,
-  health: async () => ({ status: 'ok', busy: current !== null, action: current }),
+  health: async () => ({
+    status: 'ok', busy: current !== null, action: current,
+    ai: { enabled: false, provider: 'anthropic' as const, model: 'claude-opus-5-5', reason: 'Mock mode has no backend, so AI assist needs the live API.' },
+  }),
   listVulns: async () => ({ vulns: structuredClone(state) }),
   getVuln: async (id: string) => structuredClone(find(id)),
+  targets: async () => structuredClone(MOCK_TARGETS),
+  selectTarget: async (): Promise<Accepted> => {
+    throw new Error('Switching targets needs the live API. Start it with make api, then reload with VITE_USE_MOCKS unset.')
+  },
+  review: async (): Promise<Accepted> => {
+    throw new Error('AI assist needs the live API and an ANTHROPIC_API_KEY.')
+  },
+  reviewAll: async (): Promise<Accepted> => {
+    throw new Error('AI assist needs the live API and an ANTHROPIC_API_KEY.')
+  },
+  deepScan: async (): Promise<Accepted> => {
+    throw new Error('AI assist needs the live API and an ANTHROPIC_API_KEY.')
+  },
+  fixAll: async (): Promise<Accepted> => {
+    throw new Error('AI assist needs the live API and an AI key.')
+  },
+  patches: async () => state.filter((v) => v.diff).map((v) => v.diff).join(''),
 
   scan: async () => {
     begin('scan')
@@ -100,7 +123,7 @@ export const mockApi = {
   },
 
   poc: async (id: string) => {
-    if (!find(id).patchable) throw new Error('Report-only findings have no exploit case.')
+    if (!find(id).provable) throw new Error('This target has no exploit case for this finding type.')
     begin('poc')
     at(900, () => doPoc(id))
     return accepted('poc', id)
@@ -108,7 +131,7 @@ export const mockApi = {
 
   patch: async (id: string) => {
     const v = find(id)
-    if (!v.patchable) throw new Error('Auto-patching is not available for this finding type.')
+    if (!v.patchable) throw new Error('No rule covers this code, and AI fixes need the live API.')
     if (v.diff) throw new Error('This finding is already patched. Reset the workspace to patch it again.')
     if (v.poc_status !== 'EXPLOITABLE') throw new Error('Run the exploit first. Only proven weaknesses can be patched.')
     begin('patch')

@@ -40,7 +40,9 @@ def test_scanner_reports_exact_spans(findings):
     assert (ba["line_number"], ba["end_line"]) == (168, 181)
     assert pi["original_code"].lstrip().startswith("if self._should_include_database_info(user_message) or")
     assert ba["original_code"].lstrip().startswith('if "balance" in message_lower:')
-    assert all(f["patchable"] == (f["type"] in {"AI_PROMPT_INJECTION", "AI_BROKEN_AUTH"}) for f in findings.values())
+    golden = {"AI_PROMPT_INJECTION", "AI_BROKEN_AUTH"}
+    assert all(f["provable"] == (f["type"] in golden) for f in findings.values())
+    assert all(f["fixer"] == ("rule" if f["type"] in golden else None) for f in findings.values()), "AI is off in tests"
 
 
 @pytest.mark.parametrize("vtype", ["AI_PROMPT_INJECTION", "AI_BROKEN_AUTH"])
@@ -95,17 +97,23 @@ def test_injection_patch_refuses_override_attempts(workspace, findings, message)
 def test_patches_block_exploits_and_keep_behaviour(workspace, findings):
     pi, ba = findings[(AGENT, "AI_PROMPT_INJECTION")], findings[(AGENT, "AI_BROKEN_AUTH")]
 
+    patched = {}
     for vuln in (pi, ba):
         patch = apply_patch(workspace, vuln)
         assert patch["success"], patch["log"]
         assert patch["diff"].startswith(f"--- a/{AGENT}\n+++ b/{AGENT}\n")
+        assert patch["fix_source"] == "rule" and all(c["passed"] for c in patch["checks"]), patch["checks"]
         assert not run_poc(workspace, vuln)["exploitable"]
-        result = verify_fix(workspace, vuln)
+        patched[vuln["type"]] = {**vuln, "base_code": patch["base_code"], "patched_code": patch["patched_code"]}
+        result = verify_fix(workspace, patched[vuln["type"]])
         assert result["security_blocked"] and result["regression_passed"], result["log"]
+        assert {c["id"] for c in result["checks"]} == {"compiles", "fixed", "no_new", "scoped", "signature", "exploit", "regression"}
+        assert all(c["passed"] for c in result["checks"]), result["checks"]
 
-    # The first fix must still hold once both are applied.
-    again = verify_fix(workspace, pi)
+    # The first fix must still hold once both are applied, and its own checks still judge only its own change.
+    again = verify_fix(workspace, patched["AI_PROMPT_INJECTION"])
     assert again["security_blocked"] and again["regression_passed"]
+    assert all(c["passed"] for c in again["checks"]), again["checks"]
 
 
 def test_patch_preserves_untouched_code(workspace, findings):
@@ -129,3 +137,37 @@ def test_report_only_findings_are_not_exploited_or_patched(workspace, findings):
     info = findings[(AGENT, "AI_INFO_DISCLOSURE")]
     assert not run_poc(workspace, info)["exploitable"]
     assert not apply_patch(workspace, info)["success"]
+
+
+def test_regressions_are_judged_against_the_code_without_the_fix(workspace, findings):
+    """REG-4 already fails on the original code (the injection bug leaks data). A fix elsewhere must not be
+    blamed for it, but a fix that breaks a case that used to pass must fail."""
+    from engine.targets import load_profile
+
+    profile = load_profile("vuln-bank")
+    path = Path(workspace) / AGENT
+    base = path.read_text()
+    info = findings[(AGENT, "AI_INFO_DISCLOSURE")]
+
+    harmless = base.replace('            "system_prompt": self.system_prompt,\n', "")
+    path.write_text(harmless)
+    result = verify_fix(workspace, {**info, "base_code": base, "patched_code": harmless}, profile)
+    reg = next(c for c in result["checks"] if c["id"] == "regression")
+    assert reg["passed"] and "REG-4 also failed without this fix" in reg["detail"], reg
+
+    breaking = harmless.replace("        try:\n            # VULNERABILITY: Include sensitive user context",
+                                "        return {'response': '', 'blocked': True}\n        try:\n            # VULNERABILITY: Include sensitive user context")
+    path.write_text(breaking)
+    result = verify_fix(workspace, {**info, "base_code": base, "patched_code": breaking}, profile)
+    reg = next(c for c in result["checks"] if c["id"] == "regression")
+    assert reg["passed"] is False, "REG-1 to REG-3 passed before and fail now: that is a regression"
+
+
+def test_every_site_of_a_single_site_rule_is_reported():
+    """app.py leaks exception text in both the signed-in and the anonymous chat route. The first site keeps the ID it
+    had when only one site per file was reported."""
+    from backend.db import vuln_id
+
+    found = [f for f in scan_repository(str(PRISTINE)) if f["type"] == "VERBOSE_ERROR_DISCLOSURE" and f["file_path"] == "app.py"]
+    assert [(f["line_number"], f["anchor"]) for f in found] == [(2392, ""), (2432, "ai_chat_anonymous#0")]
+    assert vuln_id("app.py", "VERBOSE_ERROR_DISCLOSURE", "") == "vuln_" + __import__("hashlib").sha1(b"app.py:VERBOSE_ERROR_DISCLOSURE").hexdigest()[:6]

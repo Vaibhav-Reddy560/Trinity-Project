@@ -1,4 +1,4 @@
-import { Bug, Crosshair, FileText, LayoutDashboard, Play, ScanSearch, ScrollText } from 'lucide-react'
+import { Bug, Crosshair, FileText, LayoutDashboard, Play, ScanSearch, ScrollText, Sparkles } from 'lucide-react'
 import {
   Command,
   CommandDialog,
@@ -11,6 +11,7 @@ import {
   CommandShortcut,
 } from '@/components/ui/command'
 import type { Pending } from '@/hooks/useVulns'
+import { useAI } from '@/lib/aiContext'
 import { severityLabel, typeName } from '@/lib/format'
 import { verdictFor } from '@/lib/pipeline'
 import { href } from '@/lib/router'
@@ -19,7 +20,7 @@ import type { Action, Vuln } from '@/lib/types'
 const PAGES = [
   { label: 'Overview', icon: LayoutDashboard, to: href.overview },
   { label: 'Findings', icon: Bug, to: href.findings },
-  { label: 'Target & scope', icon: Crosshair, to: href.scope },
+  { label: 'Targets', icon: Crosshair, to: href.scope },
   { label: 'Activity', icon: ScrollText, to: href.activity },
   { label: 'Report', icon: FileText, to: href.report },
 ]
@@ -31,6 +32,7 @@ export function CommandPalette({ open, onOpenChange, vulns, pending, onRun }: {
   pending: Pending
   onRun: (a: Action) => void
 }) {
+  const ai = useAI()
   const go = (to: string) => {
     window.location.hash = to
     onOpenChange(false)
@@ -54,6 +56,19 @@ export function CommandPalette({ open, onOpenChange, vulns, pending, onRun }: {
             <CommandItem disabled={pending !== null} onSelect={() => act('scan')}>
               <ScanSearch /> Scan target
             </CommandItem>
+            {ai.enabled && (
+              <>
+                <CommandItem disabled={pending !== null} onSelect={() => act('deep-scan')}>
+                  <Sparkles className="text-signal" /> AI deep scan
+                </CommandItem>
+                <CommandItem disabled={pending !== null || vulns.length === 0} onSelect={() => act('review-all')}>
+                  <Sparkles /> AI review all findings
+                </CommandItem>
+                <CommandItem disabled={pending !== null || vulns.length === 0} onSelect={() => act('fix-all')}>
+                  <Sparkles /> AI fix all open findings
+                </CommandItem>
+              </>
+            )}
           </CommandGroup>
           <CommandSeparator />
           <CommandGroup heading="Pages">

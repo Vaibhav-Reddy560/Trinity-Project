@@ -1,7 +1,9 @@
-import { Bug, Crosshair, FileText, LayoutDashboard, ScrollText, type LucideIcon } from 'lucide-react'
+import { Bug, Crosshair, FileText, LayoutDashboard, ScrollText, Sparkles, type LucideIcon } from 'lucide-react'
 import type { ApiState } from '@/hooks/useVulns'
+import { useAI } from '@/lib/aiContext'
+import { modelName } from '@/lib/format'
 import { href, type Route } from '@/lib/router'
-import { TARGET } from '@/lib/scope'
+import { useActiveTarget } from '@/lib/targetContext'
 import { cn } from '@/lib/utils'
 import { Logo } from './Logo'
 
@@ -9,7 +11,7 @@ type NavKey = 'overview' | 'findings' | 'scope' | 'activity' | 'report'
 const NAV: { key: NavKey; label: string; icon: LucideIcon; href: string }[] = [
   { key: 'overview', label: 'Overview', icon: LayoutDashboard, href: href.overview },
   { key: 'findings', label: 'Findings', icon: Bug, href: href.findings },
-  { key: 'scope', label: 'Target & scope', icon: Crosshair, href: href.scope },
+  { key: 'scope', label: 'Targets', icon: Crosshair, href: href.scope },
   { key: 'activity', label: 'Activity', icon: ScrollText, href: href.activity },
   { key: 'report', label: 'Report', icon: FileText, href: href.report },
 ]
@@ -28,6 +30,8 @@ export function Sidebar({ route, counts, apiState }: {
   apiState: ApiState
 }) {
   const active = activeKey(route)
+  const target = useActiveTarget()
+  const ai = useAI()
   return (
     <aside className="no-print flex flex-col border-border bg-void/85 backdrop-blur lg:fixed lg:inset-y-0 lg:left-0 lg:w-64 lg:border-r">
       <div className="flex items-center justify-between px-5 pt-5 pb-4 lg:pb-6">
@@ -61,16 +65,25 @@ export function Sidebar({ route, counts, apiState }: {
       <div className="mt-auto hidden space-y-3 p-4 lg:block">
         <div className="border border-border bg-panel/80 p-4">
           <p className="label">Target</p>
-          <p className="mt-1 text-sm font-semibold text-bone">{TARGET.name}</p>
-          <p className="text-xs text-ash tabular-nums">commit {TARGET.commit}</p>
+          <a href={href.scope} className="mt-1 block truncate text-sm font-semibold text-bone hover:text-ember">{target.name}</a>
+          <p className="truncate text-xs text-ash tabular-nums">
+            {target.commit ? `commit ${target.commit}` : target.kind === 'project' ? 'your project, never run' : 'practice fixture'}
+          </p>
           <p className="label mt-3">Module</p>
-          <p className="mt-1 text-sm text-bone">{TARGET.module}</p>
+          <p className="mt-1 text-sm text-bone">{target.module}</p>
         </div>
         <div className="flex items-start gap-3 border border-border bg-panel/80 p-4" role="status">
           <span aria-hidden className={cn('mt-1.5 size-2 shrink-0 rounded-full', modeInfo[apiState].dot)} />
           <div>
             <p className="text-sm text-bone">{modeInfo[apiState].label}</p>
             <p className="text-xs text-ash">{modeInfo[apiState].detail}</p>
+          </div>
+        </div>
+        <div className="flex items-start gap-3 border border-border bg-panel/80 p-4" role="status">
+          <Sparkles aria-hidden className={cn('mt-0.5 size-4 shrink-0', ai.enabled ? 'text-signal drop-shadow-[0_0_6px_var(--color-signal)]' : 'text-ash')} />
+          <div className="min-w-0">
+            <p className="text-sm text-bone">{ai.enabled ? 'AI assist on' : 'AI assist off'}</p>
+            <p className="text-xs text-ash">{ai.enabled ? modelName(ai.model) : apiState === 'online' ? 'Add an AI key to .env' : 'Needs the live API'}</p>
           </div>
         </div>
       </div>

@@ -9,6 +9,7 @@ SCHEMA_KEYS = {
     "id", "file_path", "line_number", "end_line", "severity", "type", "cwe", "title", "severity_rationale",
     "status", "patchable", "original_code", "patched_code", "diff", "patch_rationale", "poc_status",
     "regression_status", "poc_log", "verification_log", "created_at", "updated_at",
+    "provable", "fixer", "detected_by", "fix_source", "checks", "ai_review", "behaviour_change", "base_code",
 }
 
 
@@ -33,7 +34,7 @@ def test_scan_populates_findings_in_contract_shape(client):
     assert r.status_code == 202 and r.json() == {"accepted": True, "action": "scan"}
 
     found = vulns(client)
-    assert len(found) == 7
+    assert len(found) == 8
     assert all(set(v) == SCHEMA_KEYS for v in found)
     assert found[0]["type"] == "AI_PROMPT_INJECTION" and found[0]["severity"] == "CRITICAL"
     assert all(v["status"] == "OPEN" and v["poc_status"] == "NOT_RUN" for v in found)
@@ -104,7 +105,7 @@ def test_rescan_keeps_state_and_does_not_duplicate(client):
     client.post(f"{API}/run-all")
     client.post(f"{API}/scan")
     found = vulns(client)
-    assert len(found) == 7
+    assert len(found) == 8
     assert by_type(client, "AI_PROMPT_INJECTION")["status"] == "VERIFIED"
 
 
@@ -124,6 +125,21 @@ def test_only_one_action_runs_at_a_time(client):
     try:
         r = client.post(f"{API}/scan")
         assert r.status_code == 409
-        assert client.get(f"{API}/health").json() == {"status": "ok", "busy": True, "action": "scan"}
+        health = client.get(f"{API}/health").json()
+        assert (health["busy"], health["action"]) == (True, "scan")
     finally:
         jobs.run(lambda: None)
+
+
+def test_records_saved_by_an_older_version_still_load(client):
+    db.add_findings([])
+    with db._lock:
+        db._table().insert({
+            "id": "vuln_old", "file_path": "ai_agent_deepseek.py", "line_number": 1, "end_line": 2, "severity": "HIGH",
+            "type": "AI_BROKEN_AUTH", "cwe": "CWE-862", "title": "t", "severity_rationale": "r", "status": "OPEN",
+            "patchable": True, "original_code": "x", "patched_code": None, "diff": None, "patch_rationale": None,
+            "poc_status": "NOT_RUN", "regression_status": "NOT_RUN", "poc_log": [], "verification_log": [],
+            "created_at": "2026-10-30T00:00:00Z", "updated_at": "2026-10-30T00:00:00Z",
+        })
+    [old] = vulns(client)
+    assert set(old) == SCHEMA_KEYS and old["provable"] and old["fixer"] == "rule"

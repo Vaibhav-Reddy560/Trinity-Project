@@ -1,13 +1,17 @@
-import { ChevronRight, Search } from 'lucide-react'
+import { ChevronRight, Download, Search, Sparkles, Wrench } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { PageHeader } from '@/components/Panel'
 import { Pill, SeverityTag, VerdictPill } from '@/components/Pills'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { Pending } from '@/hooks/useVulns'
-import { SEVERITIES, codeLocation, severityLabel, typeName } from '@/lib/format'
+import { aiName, useAI } from '@/lib/aiContext'
+import { api } from '@/lib/api'
+import { SEVERITIES, codeLocation, downloadFile, modelName, severityLabel, typeName } from '@/lib/format'
 import { verdictFor, type Verdict } from '@/lib/pipeline'
 import { href } from '@/lib/router'
-import type { Severity, Vuln } from '@/lib/types'
+import type { Action, Severity, Vuln } from '@/lib/types'
+import { useActiveTarget } from '@/lib/targetContext'
 import { cn } from '@/lib/utils'
 import { EmptyFindings } from './EmptyFindings'
 
@@ -21,26 +25,41 @@ const STATUS_FILTERS: { key: 'all' | Verdict; label: string }[] = [
 ]
 
 function ExploitCell({ v }: { v: Vuln }) {
-  if (!v.patchable) return <span className="text-ash">No exploit</span>
+  if (!v.provable) return <span className="text-ash">Not needed</span>
   if (v.poc_status === 'EXPLOITABLE') return <Pill tone="amber" pulse>Reproduced</Pill>
   if (v.poc_status === 'BLOCKED') return <Pill tone="neutral">Blocked</Pill>
   return <span className="text-ash">Not run</span>
 }
 
 function PatchCell({ v }: { v: Vuln }) {
-  if (!v.patchable) return <span className="text-ash">Report only</span>
-  if (v.diff) return <Pill tone="signal">Applied</Pill>
-  return <span className="text-ash">Not patched</span>
+  if (v.diff) return <Pill tone={v.fix_source === 'ai' ? 'amber' : 'signal'}>{v.fix_source === 'ai' ? 'AI fix' : 'Applied'}</Pill>
+  if (!v.patchable) return <span className="text-ash">By hand</span>
+  return <span className="text-ash">{v.fixer === 'ai' ? 'AI can fix' : 'Rule ready'}</span>
 }
 
 function TestsCell({ v }: { v: Vuln }) {
-  if (!v.patchable) return <span className="text-ash">—</span>
-  if (v.status === 'VERIFIED') return <Pill tone="hot">Passed</Pill>
+  if (!v.patchable && !v.diff) return <span className="text-ash">—</span>
+  if (v.status === 'VERIFIED') return <Pill tone="hot">{v.provable ? 'Passed' : 'Checks passed'}</Pill>
   if (v.status === 'FAILED') return <Pill tone="fail">Failed</Pill>
   return <span className="text-ash">Not run</span>
 }
 
-export function FindingsPage({ vulns, pending, onScan }: { vulns: Vuln[]; pending: Pending; onScan: () => void }) {
+const REVIEW_LABEL = { confirmed: 'AI: likely real', false_positive: 'AI: likely false positive', uncertain: 'AI: unsure' } as const
+
+export function FindingsPage({ vulns, pending, onRun }: { vulns: Vuln[]; pending: Pending; onRun: (a: Action) => void }) {
+  const target = useActiveTarget()
+  const ai = useAI()
+  const busy = pending !== null
+  const fixed = vulns.some((v) => v.diff)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
+  const downloadAll = async () => {
+    try {
+      setDownloadError(null)
+      downloadFile(`patchproof-fixes-${target.name.replace(/[^\w.-]+/g, '-')}.patch`, await api.patches(), 'text/x-diff')
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : 'Download failed.')
+    }
+  }
   const [query, setQuery] = useState('')
   const [severity, setSeverity] = useState<'all' | Severity>('all')
   const [status, setStatus] = useState<'all' | Verdict>('all')
@@ -59,12 +78,54 @@ export function FindingsPage({ vulns, pending, onScan }: { vulns: Vuln[]; pendin
     <>
       <PageHeader
         title="Findings"
-        description={<p>Weaknesses found in the AI customer support module. Open one to see its exploit evidence, the patch and the test results.</p>}
+        description={<p>Weaknesses found in {target.name}. Open one to see the exact lines, why it matters, the fix and the proof that it works.</p>}
+        actions={
+          <>
+            {fixed && <Button variant="outline" size="lg" onClick={() => void downloadAll()}><Download /> All fixes (.patch)</Button>}
+            <Button variant="outline" size="lg" disabled={busy || !ai.enabled || !vulns.some((v) => v.status === 'OPEN' && v.patchable)}
+              onClick={() => onRun('fix-all')}
+              title={ai.enabled ? `Fix every open finding with rules or ${aiName(ai)}, one at a time; each fix must pass every check` : ai.reason ?? undefined}>
+              <Wrench /> {pending?.action === 'fix-all' ? 'Fixing all' : 'AI fix all'}
+            </Button>
+            <Button variant="outline" size="lg" disabled={busy || !ai.enabled || vulns.length === 0} onClick={() => onRun('review-all')}
+              title={ai.enabled ? `${aiName(ai)} reviews every rule finding: real or false positive` : ai.reason ?? undefined}>
+              <Sparkles /> {pending?.action === 'review-all' ? 'Reviewing' : 'AI review all'}
+            </Button>
+            <Button size="lg" disabled={busy || !ai.enabled} onClick={() => onRun('deep-scan')}
+              title={ai.enabled ? `${aiName(ai)} reads the code for logic flaws the rules cannot see` : ai.reason ?? undefined}
+              className="shadow-[var(--glow-signal)] disabled:shadow-none">
+              <Sparkles /> {pending?.action === 'deep-scan' ? 'Deep scanning' : 'AI deep scan'}
+            </Button>
+          </>
+        }
       />
 
+      {!ai.enabled && (
+        <p className="mb-4 text-sm text-ash">
+          AI assist is off: rule-based scanning and fixes still work. {ai.reason}
+        </p>
+      )}
+      {downloadError && <p role="alert" className="mb-4 text-sm text-ember">{downloadError}</p>}
+      {target.deep_scan && (
+        <p className="mb-4 text-sm text-ash">
+          Last AI deep scan by {modelName(target.deep_scan.model)}: {target.deep_scan.files} file{target.deep_scan.files === 1 ? '' : 's'} read,{' '}
+          {target.deep_scan.added} new finding{target.deep_scan.added === 1 ? '' : 's'}
+          {target.deep_scan.dropped > 0 && `, ${target.deep_scan.dropped} answer${target.deep_scan.dropped === 1 ? '' : 's'} dropped for not matching the code`}
+          {target.deep_scan.errors.length > 0 && <span className="text-ember">. Errors: {target.deep_scan.errors.join('; ')}</span>}.
+        </p>
+      )}
+
       {vulns.length === 0 ? (
-        <EmptyFindings pending={pending} onScan={onScan} />
+        <EmptyFindings pending={pending} onScan={() => onRun('scan')} />
       ) : (
+        <>
+        {target.kind === 'project' && (
+          <p className="mb-4 flex flex-wrap items-center gap-x-2 border border-amber/50 bg-amber/10 px-4 py-3 text-sm text-bone">
+            <span className="font-semibold text-amber">Your project is never run.</span>
+            {target.stats ? `${target.stats.files_scanned} Python files read.` : ''} No exploits are attempted: fixes go to a copy and are
+            proven by static checks. Your folder is never changed.
+          </p>
+        )}
         <section className="panel" aria-label="Findings table">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-border px-5 py-4">
             <label className="relative w-full sm:w-72">
@@ -121,6 +182,12 @@ export function FindingsPage({ vulns, pending, onScan }: { vulns: Vuln[]; pendin
                           {typeName[v.type]}
                         </a>
                         <p className="mt-1 text-ash">{v.title}</p>
+                        {(v.detected_by === 'ai' || v.ai_review?.verdict) && (
+                          <p className="mt-1.5 flex flex-wrap gap-2">
+                            {v.detected_by === 'ai' && <Pill tone="amber">Found by AI</Pill>}
+                            {v.ai_review?.verdict && <Pill tone={v.ai_review.verdict === 'false_positive' ? 'muted' : 'neutral'}>{REVIEW_LABEL[v.ai_review.verdict]}</Pill>}
+                          </p>
+                        )}
                       </td>
                       <td className="py-4 pr-4 align-top text-bone/80 tabular-nums">
                         {codeLocation(v)}
@@ -153,6 +220,7 @@ export function FindingsPage({ vulns, pending, onScan }: { vulns: Vuln[]; pendin
             </>
           )}
         </section>
+        </>
       )}
     </>
   )

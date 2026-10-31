@@ -65,6 +65,19 @@
     "patchable": false
   },
   {
+    "id": "vuln_180dd3",
+    "file_path": "app.py",
+    "line_number": 2432,
+    "end_line": 2437,
+    "severity": "MEDIUM",
+    "type": "VERBOSE_ERROR_DISCLOSURE",
+    "cwe": "CWE-209",
+    "title": "Chat errors return raw exception text",
+    "severity_rationale": "The AI chat routes send the raw exception message and the full system info back to the caller whenever something fails.",
+    "original_code": "    except Exception as e:\n        return jsonify({\n            'status': 'error',\n            'message': f'Anonymous AI chat error: {str(e)}',\n            'system_info': ai_agent.get_system_info()\n        }), 500",
+    "patchable": false
+  },
+  {
     "id": "vuln_6f1aa1",
     "file_path": "app.py",
     "line_number": 2441,

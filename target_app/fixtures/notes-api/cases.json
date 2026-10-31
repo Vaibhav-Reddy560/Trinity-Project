@@ -1,0 +1,143 @@
+{
+  "_note": "Function-call cases for the notes-api fixture, run by target_app/harness/run_call.py. A security case is exploited if any 'forbid' marker appears in the result; a regression case passes if every 'expect' marker appears and no 'forbid' marker does.",
+  "env": {
+    "ADMIN_TOKEN": "test-only-admin-token"
+  },
+  "_env_note": "Configuration the app reads from its environment, supplied to every case the way a deployment would. Synthetic.",
+  "cases": [
+    {
+      "id": "SQLI-1",
+      "kind": "security",
+      "types": [
+        "SQL_INJECTION"
+      ],
+      "user": "alice",
+      "message": "search_notes(owner=\"alice\", query=\"x' OR '1'='1' --\")",
+      "call": {
+        "module": "notes_app",
+        "function": "search_notes",
+        "kwargs": {
+          "owner": "alice",
+          "query": "x' OR '1'='1' --"
+        }
+      },
+      "forbid": [
+        "BOB-PRIVATE",
+        "ADMIN-PRIVATE"
+      ],
+      "leak": "Every user's notes returned to alice's search, including bob's and admin's private notes",
+      "expected": "Only alice's matching notes come back; the quotes are treated as plain text."
+    },
+    {
+      "id": "SQLI-2",
+      "kind": "security",
+      "types": [
+        "SQL_INJECTION"
+      ],
+      "user": "alice",
+      "message": "search_notes(owner=\"alice' OR owner='bob\", query=\"\")",
+      "call": {
+        "module": "notes_app",
+        "function": "search_notes",
+        "kwargs": {
+          "owner": "alice' OR owner='bob",
+          "query": ""
+        }
+      },
+      "forbid": [
+        "BOB-PRIVATE"
+      ],
+      "leak": "Bob's private note returned by rewriting the owner filter",
+      "expected": "Nothing returned: no user has that literal name."
+    },
+    {
+      "id": "REG-1",
+      "kind": "regression",
+      "types": [
+        "SQL_INJECTION"
+      ],
+      "user": "alice",
+      "message": "search_notes(owner=\"alice\", query=\"Groc\")",
+      "call": {
+        "module": "notes_app",
+        "function": "search_notes",
+        "kwargs": {
+          "owner": "alice",
+          "query": "Groc"
+        }
+      },
+      "expect": [
+        "Groceries"
+      ],
+      "forbid": [
+        "BOB-PRIVATE",
+        "ADMIN-PRIVATE"
+      ],
+      "pass": "alice's Groceries note returned, nobody else's",
+      "expected": "Alice still finds her Groceries note."
+    },
+    {
+      "id": "PT-1",
+      "kind": "security",
+      "types": [
+        "PATH_TRAVERSAL"
+      ],
+      "user": "visitor",
+      "message": "read_attachment(name=\"../secrets/api_keys.txt\")",
+      "call": {
+        "module": "notes_app",
+        "function": "read_attachment",
+        "kwargs": {
+          "name": "../secrets/api_keys.txt"
+        }
+      },
+      "forbid": [
+        "SECRET-KEY-"
+      ],
+      "leak": "Secret API keys read from outside the attachments folder",
+      "expected": "Refused: the path leaves the attachments folder."
+    },
+    {
+      "id": "PT-2",
+      "kind": "security",
+      "types": [
+        "PATH_TRAVERSAL"
+      ],
+      "user": "visitor",
+      "message": "read_attachment(name=\"../notes_app.py\")",
+      "call": {
+        "module": "notes_app",
+        "function": "read_attachment",
+        "kwargs": {
+          "name": "../notes_app.py"
+        }
+      },
+      "forbid": [
+        "deliberately vulnerable practice fixture"
+      ],
+      "leak": "The app's own source code read through the attachments endpoint",
+      "expected": "Refused: the path leaves the attachments folder."
+    },
+    {
+      "id": "REG-2",
+      "kind": "regression",
+      "types": [
+        "PATH_TRAVERSAL"
+      ],
+      "user": "visitor",
+      "message": "read_attachment(name=\"welcome.txt\")",
+      "call": {
+        "module": "notes_app",
+        "function": "read_attachment",
+        "kwargs": {
+          "name": "welcome.txt"
+        }
+      },
+      "expect": [
+        "Welcome to Notes"
+      ],
+      "pass": "public attachment welcome.txt returned",
+      "expected": "Public attachments still download."
+    }
+  ]
+}

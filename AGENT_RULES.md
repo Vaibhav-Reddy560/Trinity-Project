@@ -19,7 +19,7 @@ Three humans and three AI agents work in this repo at the same time. These rules
 
 Exceptions:
 - Dependencies. The Engine and Backend agents may run `uv add <pkg>`, which edits `pyproject.toml` and `uv.lock`. The Frontend agent may run `npm i <pkg>` inside `frontend/`. **Log every dependency added in `HANDOFF.md`.** If `uv.lock` conflicts, resolve it by re-running `uv lock`. Never hand-edit it.
-- `target_app/vuln-bank/` is the **pristine snapshot**. Nobody edits it, including the Lead. Patches only ever touch the workspace copy under `backend/data/workspace/`.
+- `target_app/vuln-bank/` and `target_app/fixtures/` are **pristine sources**. Nobody edits them, including the Lead. Patches only ever touch the workspace copy under `backend/data/workspace/`.
 
 ## 3. Architectural Purity
 - **Engine is pure Python.** Never import `fastapi`, `starlette`, `tinydb`, `requests`, `httpx`, or anything HTTP or DB. Functions take paths and dicts and return dicts (`engine/models.py`). No global state, and no decisions about where files live.
@@ -29,7 +29,10 @@ Exceptions:
 ## 4. Forbidden
 - **Docker** (for dev), **Celery**, **Redis**, **SQLAlchemy**, **PostgreSQL**, or any other DB server or queue.
 - **Raw string or regex replacement to patch code.** All code modifications use **LibCST**, so formatting, comments and imports are preserved.
-- Network calls from the PoC harness or the engine. The harness stays **offline and deterministic**. No real DeepSeek or OpenAI calls.
+- Network calls from the PoC harness or the engine, with one exception. The harness stays **offline and deterministic**: no real DeepSeek or OpenAI calls.
+  - The exception is `engine/ai.py`, which may call the Anthropic or Gemini API, only when the user has set a key.
+  - AI output never decides a result on its own: fixes must pass `engine/checks.py`, AI findings must quote real lines, and reviews are opinion.
+  - Tests never call the API (`conftest.py` forces AI off; use `ai.set_responder`).
 - Real personal data. All data is synthetic (`target_app/harness/fixtures.json`).
 - Committing secrets, `.env` files, `backend/data/`, `node_modules/`, or the font source packs.
 - Adding any font beyond the three in `PROJECT_CONTEXT.md` §9 (no monospace, Google Fonts or `@fontsource`). Technor is the body font for everything, including code and logs. Moonhouse is for headlines. Vintage Glitch is only for the project name, and only inside `frontend/src/components/Logo.tsx` (`<Logo/>`, `<Wordmark/>`).

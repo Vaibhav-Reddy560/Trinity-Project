@@ -1,4 +1,5 @@
-import { Bug, ChevronLeft, ChevronRight, CircleAlert, FlaskConical, ShieldCheck, Wrench } from 'lucide-react'
+import { Bug, ChevronLeft, ChevronRight, CircleAlert, FlaskConical, ShieldCheck, Sparkles, Wrench } from 'lucide-react'
+import { AIReviewCard } from '@/components/AIReviewCard'
 import { CodeBlock } from '@/components/CodeBlock'
 import { DiffView } from '@/components/DiffView'
 import { useEffect, useRef, useState } from 'react'
@@ -7,16 +8,19 @@ import { TYPE_INFO } from '@/lib/knowledge'
 import { PageHeader, Panel } from '@/components/Panel'
 import { Pill, SeverityTag, VerdictPill, caseTone } from '@/components/Pills'
 import { PipelineRing, type RingSegment } from '@/components/PipelineRing'
+import { ProofChecks } from '@/components/ProofChecks'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Pending } from '@/hooks/useVulns'
-import { clock, codeLocation, typeName } from '@/lib/format'
+import { useAI } from '@/lib/aiContext'
+import { clock, codeLocation, fixSourceLabel, modelName, typeName } from '@/lib/format'
 import {
-  baselineResult, canPatch, canRunPoc, canVerify, caseResult, diffStats, nextAction, nextActionHint, provenLeaks, stagesFor, verdictFor,
-  type Baseline, type Stage, type StepAction,
+  baselineResult, canPatch, canRunPoc, canVerify, caseResult, diffStats, nextAction, nextActionHint, proofLabel, proofOf, provenLeaks,
+  stagesFor, verdictFor, type Baseline, type Stage, type StepAction,
 } from '@/lib/pipeline'
 import { href } from '@/lib/router'
-import { SECURITY_IDS, casesFor } from '@/lib/scope'
+import { proofCases, securityIds } from '@/lib/scope'
+import { useActiveTarget } from '@/lib/targetContext'
 import type { Tone } from '@/components/Pills'
 
 const baselineTone: Record<Baseline, Tone> = {
@@ -41,7 +45,7 @@ const verdictTitleClass = {
 
 const sublineFor = {
   Verified: 'Exploit blocked, behaviour intact',
-  Failed: 'The fix did not pass its tests',
+  Failed: 'The fix did not pass its checks',
   Patched: 'Fix applied, not yet verified',
   Exploitable: 'Exploit reproduced',
   Blocked: 'Exploit did not work',
@@ -65,15 +69,20 @@ function stageDetail(s: Stage, v: Vuln): string {
     case 'scan':
       return `Found at ${clock(v.created_at)}`
     case 'prove':
-      if (!v.patchable) return 'No exploit for this finding type'
+      if (!v.provable) return 'No exploit case: proven by checks instead'
       return v.poc_status === 'EXPLOITABLE' ? `Exploit reproduced at ${clock(v.poc_log[0]?.ts ?? v.updated_at)}`
         : v.poc_status === 'BLOCKED' ? 'Exploit blocked' : 'Not run yet'
     case 'patch':
-      if (!v.patchable) return 'Report only'
-      return v.diff ? `${d.hunks} change${d.hunks === 1 ? '' : 's'}, +${d.added} / −${d.removed} lines` : 'Not patched yet'
-    case 'verify':
-      if (!v.patchable) return 'Report only'
-      return v.status === 'VERIFIED' ? 'Security and regression tests passed' : v.status === 'FAILED' ? 'Tests failed' : 'Not verified yet'
+      if (s.state === 'skipped') return 'No automatic fix'
+      if (v.diff) return `${v.fix_source === 'ai' ? 'AI' : 'Rule'}: ${d.hunks} change${d.hunks === 1 ? '' : 's'}, +${d.added} / −${d.removed} lines`
+      return v.status === 'FAILED' ? 'No fix passed its checks' : v.fixer === 'ai' ? 'AI can write one' : 'Rule-based fix ready'
+    case 'verify': {
+      if (s.state === 'skipped') return 'No automatic fix'
+      const ran = v.checks.filter((c) => c.passed !== null)
+      if (v.status === 'VERIFIED') return `${ran.length}/${ran.length} checks passed`
+      if (v.status === 'FAILED' && v.diff) return `${ran.filter((c) => c.passed).length}/${ran.length} checks passed`
+      return 'Not verified yet'
+    }
   }
 }
 
@@ -85,30 +94,39 @@ const stageDot: Record<Stage['state'], string> = {
   skipped: 'border border-ash/25',
 }
 
-const stepIcon = { poc: Bug, patch: Wrench, verify: ShieldCheck }
 const STEP_TAB: Record<StepAction, string> = { poc: 'evidence', patch: 'patch', verify: 'tests' }
-const stepLabel: Record<StepAction, string> = { poc: 'Run exploit', patch: 'Apply patch', verify: 'Verify fix' }
-const stepRunning: Record<StepAction, string> = { poc: 'Running exploit', patch: 'Applying patch', verify: 'Verifying fix' }
+
+function stepLabel(v: Vuln, a: StepAction, running: boolean): string {
+  if (a === 'poc') return running ? 'Running exploit' : 'Run exploit'
+  if (a === 'verify') return running ? 'Verifying' : v.provable ? 'Verify fix' : 'Run proof checks'
+  if (v.fixer === 'ai') return running ? 'Writing an AI fix' : v.status === 'FAILED' ? 'Try again with AI' : 'Generate AI fix'
+  return running ? 'Applying patch' : v.status === 'FAILED' ? 'Try again' : 'Apply patch'
+}
 
 export function FindingPage({ vuln, vulns, pending, onAction }: {
   vuln: Vuln
   vulns: Vuln[]
   pending: Pending
-  onAction: (a: StepAction, id: string) => void
+  onAction: (a: StepAction | 'review', id: string) => void
 }) {
+  const target = useActiveTarget()
+  const ai = useAI()
+  const isProject = target.kind === 'project'
   const verdict = verdictFor(vuln)
   const stages = stagesFor(vuln)
   const next = nextAction(vuln)
-  const cases = casesFor(vuln.type)
+  const cases = proofCases(target, vuln.type)
+  const steps: StepAction[] = vuln.provable ? ['poc', 'patch', 'verify'] : ['patch', 'verify']
+  const ranChecks = vuln.checks.filter((c) => c.passed !== null)
+  const stepIcon = { poc: Bug, patch: vuln.fixer === 'ai' ? Sparkles : Wrench, verify: ShieldCheck }
   const busyHere = pending !== null && (pending.id === vuln.id || pending.action === 'run-all')
   const idx = vulns.findIndex((v) => v.id === vuln.id)
   const prev = vulns[idx - 1]
   const after = vulns[idx + 1]
   const enabled: Record<StepAction, boolean> = { poc: canRunPoc(vuln), patch: canPatch(vuln), verify: canVerify(vuln) }
   const d = diffStats(vuln.diff)
-  const passed = cases.filter((c) => caseResult(c, vuln) === 'Passed').length
   const info = TYPE_INFO[vuln.type]
-  const proofs = provenLeaks(vuln, SECURITY_IDS)
+  const proofs = provenLeaks(vuln, securityIds(target))
 
   // Each action opens the tab where its result lands, so the evidence types in on screen.
   const [tab, setTab] = useState('summary')
@@ -147,7 +165,12 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
       <PageHeader
         crumbs={<><a href={href.findings} className="hover:text-bone">Findings</a><span className="mx-2 text-blood-600">/</span><span className="text-bone/80">{typeName[vuln.type]}</span></>}
         title={typeName[vuln.type]}
-        description={<p className="text-lg text-bone">{vuln.title}</p>}
+        description={
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-lg text-bone">{vuln.title}</p>
+            {vuln.detected_by === 'ai' && <Pill tone="amber"><Sparkles className="size-3" aria-hidden />Found by AI deep scan</Pill>}
+          </div>
+        }
         actions={
           <>
             <Button variant="ghost" size="lg" disabled={!prev} onClick={() => prev && (window.location.hash = href.finding(prev.id))}>
@@ -164,28 +187,31 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
         <div><dt className="label">Severity</dt><dd className="mt-1"><SeverityTag severity={vuln.severity} /></dd></div>
         <div><dt className="label">Weakness</dt><dd className="mt-1 text-sm text-bone">{vuln.cwe}</dd></div>
         <div className="col-span-2 md:col-span-1"><dt className="label">Location</dt><dd className="mt-1 text-sm text-bone tabular-nums">{codeLocation(vuln)}</dd></div>
-        <div><dt className="label">Fix</dt><dd className="mt-1 text-sm text-bone">{vuln.patchable ? 'Auto-patch available' : 'Report only'}</dd></div>
+        <div><dt className="label">Fix</dt><dd className="mt-1 text-sm text-bone">
+          {vuln.fix_source ? fixSourceLabel[vuln.fix_source] : vuln.fixer === 'rule' ? 'Rule-based patch ready' : vuln.fixer === 'ai' ? `AI fix (${modelName(ai.model)})` : 'Fix by hand'}
+        </dd></div>
         <div><dt className="label">Status</dt><dd className="mt-1"><VerdictPill verdict={verdict} /></dd></div>
       </dl>
 
-      {vuln.patchable && (
+      {(next || verdict === 'Verified' || vuln.diff) && (
         <section aria-label="Next step" className="panel mb-5 flex flex-wrap items-center justify-between gap-4 px-5 py-4">
           <p className="flex items-center gap-3 text-bone">
             {next ? (
-              <><span className="text-xs whitespace-nowrap text-signal">Next step</span>{nextActionHint[next]}</>
+              <><span className="text-xs whitespace-nowrap text-signal">Next step</span>{nextActionHint(vuln, next)}</>
+            ) : verdict === 'Verified' ? (
+              <><ShieldCheck className="size-5 text-phosphor" aria-hidden />Fixed and verified. {vuln.provable ? 'You can rerun the exploit to confirm it stays blocked.' : 'Download the fix from the Patch tab.'}</>
             ) : (
-              <><ShieldCheck className="size-5 text-phosphor" aria-hidden />Fixed and verified. You can rerun the exploit to confirm it stays blocked.</>
+              <>The last fix did not pass. Fix this one by hand: the Summary shows how.</>
             )}
           </p>
           <div className="flex flex-wrap gap-2">
-            {(['poc', 'patch', 'verify'] as const).map((a) => {
+            {steps.map((a) => {
               const Icon = stepIcon[a]
-              const running = busyHere && pending?.action === a
               return (
                 <Button key={a} size="lg" variant={a === next ? 'default' : 'outline'} disabled={pending !== null || !enabled[a]}
                   onClick={() => act(a)}
                   className={cn(a === next && 'shadow-[var(--glow-signal)]', 'disabled:shadow-none')}>
-                  <Icon /> {running ? stepRunning[a] : stepLabel[a]}
+                  <Icon /> {stepLabel(vuln, a, busyHere && pending?.action === a)}
                 </Button>
               )
             })}
@@ -199,7 +225,7 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
             <PipelineRing
               label={`Pipeline status: ${verdict}`}
               title={verdict}
-              subline={sublineFor[verdict]}
+              subline={verdict === 'Verified' ? proofLabel[proofOf(vuln)] : sublineFor[verdict]}
               titleClass={verdictTitleClass[verdict]}
               hot={verdict === 'Verified'}
               busy={busyHere}
@@ -227,7 +253,7 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
               { v: 'summary', label: 'Summary' },
               { v: 'evidence', label: 'Exploit evidence', count: vuln.poc_log.length || undefined },
               { v: 'patch', label: 'Patch', count: vuln.diff ? `+${d.added} −${d.removed}` : undefined },
-              { v: 'tests', label: 'Tests', count: vuln.patchable ? `${passed}/${cases.length}` : undefined },
+              { v: 'tests', label: 'Tests', count: ranChecks.length ? `${ranChecks.filter((c) => c.passed).length}/${ranChecks.length}` : undefined },
             ].map((t) => (
               <TabsTrigger key={t.v} value={t.v}
                 className="h-12 flex-none rounded-none px-4 text-sm text-ash transition-colors duration-100 data-active:bg-blood-950/70! data-active:text-bone after:bg-signal after:shadow-[0_0_8px_var(--color-signal)] group-data-horizontal/tabs:after:bottom-0">
@@ -246,7 +272,7 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
             <dl className="grid gap-px border border-border bg-border sm:grid-cols-2">
               {[
                 { k: 'Weakness class', v: `${vuln.cwe}: ${info.cweName}` },
-                { k: 'OWASP Top 10 for LLM apps', v: info.owasp },
+                { k: 'OWASP category', v: info.owasp },
                 { k: 'Who can exploit it', v: info.attacker },
                 { k: 'Data at risk', v: info.dataAtRisk },
               ].map((r) => (
@@ -261,6 +287,9 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
               <h3 className="mb-2 text-xs text-signal">Affected code</h3>
               <CodeBlock code={vuln.original_code} startLine={vuln.line_number} label={codeLocation(vuln)} />
             </div>
+
+            <AIReviewCard review={vuln.ai_review} busy={pending !== null} running={busyHere && pending?.action === 'review'}
+              onReview={() => onAction('review', vuln.id)} />
 
             {vuln.patch_rationale ? (
               <div>
@@ -283,7 +312,7 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
           </TabsContent>
 
           <TabsContent value="evidence" className="space-y-6 p-5">
-            {vuln.patchable ? (
+            {vuln.provable ? (
               <>
                 {proofs.length > 0 && proofsShown && (
                   <div key={proofKey} className={cn('border border-ember/60 bg-ember/8 p-4', proofsAreNew && 'glitch-in-box')}>
@@ -312,31 +341,57 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
                 </div>
               </>
             ) : (
-              <p className="text-ash">This finding is reported for review. The MVP has no exploit case for {typeName[vuln.type].toLowerCase()}.</p>
+              <p className="max-w-[70ch] text-ash">{isProject
+                ? 'PatchProof never runs your project, so no exploit is attempted. A fix is proven instead by the static checks on the Tests tab.'
+                : `This target has no exploit case for ${typeName[vuln.type].toLowerCase()}. A fix is proven by the static checks and the target's whole regression suite instead.`}</p>
             )}
           </TabsContent>
 
           <TabsContent value="patch" className="space-y-5 p-5">
             {vuln.diff ? (
               <>
+                <div className="flex flex-wrap items-center gap-3">
+                  {vuln.fix_source && <Pill tone={vuln.fix_source === 'ai' ? 'amber' : 'signal'}>{fixSourceLabel[vuln.fix_source]}</Pill>}
+                  {isProject && <span className="text-xs text-ash">Applied to a copy. Your project folder is unchanged.</span>}
+                </div>
                 {vuln.patch_rationale && <p className="max-w-[70ch] leading-relaxed text-bone/90">{vuln.patch_rationale}</p>}
+                {vuln.behaviour_change && vuln.behaviour_change.toLowerCase() !== 'none' && (
+                  <p className="max-w-[70ch] text-sm leading-relaxed"><span className="text-ash">What changes for legitimate use: </span><span className="text-bone/90">{vuln.behaviour_change}</span></p>
+                )}
                 <DiffView filePath={vuln.file_path} diff={vuln.diff} vulnId={vuln.id} />
               </>
+            ) : vuln.status === 'FAILED' ? (
+              <>
+                <p className="max-w-[70ch] text-ash">No fix was applied: none passed the proof checks, so the code was left as it was.</p>
+                <EvidenceLog lines={vuln.verification_log} empty="No log recorded." />
+              </>
             ) : (
-              <p className="text-ash">
-                {vuln.patchable
-                  ? 'No patch yet. Prove the weakness with the exploit first, then apply the patch.'
-                  : 'Auto-patching is not available for this finding type. Use the summary to fix it by hand.'}
+              <p className="max-w-[70ch] text-ash">
+                {!vuln.patchable
+                  ? `No rule covers this code${ai.enabled ? '' : ' and AI fixes are off'}. Follow the numbered steps in Summary to fix it by hand.`
+                  : vuln.provable
+                    ? 'No patch yet. Prove the weakness with the exploit first, then apply the patch.'
+                    : vuln.fixer === 'ai'
+                      ? 'No patch yet. Generate one with AI: it is applied only if it passes every proof check.'
+                      : 'No patch yet. A rule-based fix is ready to apply.'}
               </p>
             )}
           </TabsContent>
 
           <TabsContent value="tests" className="space-y-6 p-5">
-            {vuln.patchable ? (
+            {vuln.patchable || vuln.diff ? (
               <>
                 <p className="max-w-[70ch] text-sm leading-relaxed text-ash">
-                  A fix only counts when both kinds of case pass: the original exploit must be blocked, and ordinary requests must still get a normal answer.
+                  A fix only counts when every check passes.{' '}
+                  {cases.length > 0
+                    ? 'On this practice target that includes running the code: the exploit cases must be blocked and the whole regression suite must still behave normally.'
+                    : 'Your project is never run, so the proof is static: the code compiles, the rule no longer fires, nothing new is flagged, and only the flagged code changed.'}
                 </p>
+                <div>
+                  <h3 className="mb-3 text-xs text-signal">Proof checks</h3>
+                  {vuln.checks.length ? <ProofChecks checks={vuln.checks} /> : <p className="text-sm text-ash">Not checked yet. They run when a fix is applied and again on verification.</p>}
+                </div>
+                {cases.length > 0 && (
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[40rem] table-fixed border-collapse text-sm">
                     <colgroup>
@@ -376,13 +431,14 @@ export function FindingPage({ vuln, vulns, pending, onAction }: {
                     </tbody>
                   </table>
                 </div>
+                )}
                 <div>
                   <h3 className="mb-3 text-xs text-signal">Verification log</h3>
                   <EvidenceLog lines={vuln.verification_log} empty="Not verified yet. Apply the patch, then verify the fix to run these cases." />
                 </div>
               </>
             ) : (
-              <p className="text-ash">Report-only findings have no automated tests.</p>
+              <p className="max-w-[70ch] text-ash">There is no automatic fix to test{ai.enabled ? '' : ' (AI fixes are off)'}. Fix it by hand using the steps in Summary.</p>
             )}
           </TabsContent>
         </Tabs>

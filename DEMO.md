@@ -4,11 +4,13 @@
 
 ## Before judges arrive (5 min)
 
-- [ ] On the demo machine, from the repo root: `make test`. Expect **29 passed**.
+- [ ] On the demo machine, from the repo root: `make test`. Expect **138 passed**.
 - [ ] Start the API: `make api` (leave the terminal minimized).
 - [ ] Start the UI: `make web`, then open http://localhost:5173 at 100% zoom, full screen, with no other tabs.
 - [ ] Click **Reset** → **Reset workspace**, so the run starts from the original, unpatched code.
+- [ ] The sidebar target card says **vuln-bank**. If it doesn't, open **Targets** and click **Switch to this target** on vuln-bank.
 - [ ] Sidebar shows **Live API**, the Overview shows **No findings yet**, and the cursor sits on the Overview page.
+- [ ] If you'll show AI: the sidebar says **AI assist on** with the model name, such as Gemini 2.5 Flash. That needs `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` in `.env`, then `make api`. If it says off, skip the AI segment; everything else works without it.
 - [ ] Have the backup plan ready (see the bottom of this file).
 
 **Roles (suggested):** *Driver* clicks and narrates. *Explainer* jumps in on the engine bits (marked ⚙). *Closer* takes Q&A.
@@ -24,8 +26,8 @@
 ### 0:15–0:30 · Find (click **Scan target**, then the **Findings** page)
 > "We pointed it at vuln-bank, a deliberately vulnerable banking app. The target is its AI customer-support assistant, pinned to one commit, with in-scope files documented on the Target & scope page."
 
-- Point at the table: **7 findings**, each with severity, CWE and **exact file:lines**.
-- > "Two are auto-fixable. The other five come with step-by-step remediation."
+- Point at the table: **8 findings**, each with severity, CWE and **exact file:lines**.
+- > "Two are proven with live exploits. The other six come with step-by-step remediation, and with AI on, a fix from the model that has to pass the same checks."
 
 > **Order matters.** Walk through **Prompt injection** by hand, and let the full pipeline handle broken authorization afterwards. If broken authorization is patched first, its fix also closes REG-4's data leak, so REG-4's baseline would read *Works* instead of the dramatic *Broken*.
 
@@ -53,18 +55,37 @@
 - Overview now shows **2 / 2** verified. Finish on **Report** (**Download JSON** / **Print or save as PDF**):
   > "Severity rationale, exact location, patch rationale and test status, ready to hand to a small team. **Find the flaw. Prove the fix.**"
 
+### Optional (+30s, or when a judge asks "does it only work on vuln-bank?")
+- Open **Targets**. Under **Scan your own project**, choose **Git URL**, paste `https://github.com/stamparm/DSVW` and click **Scan project**. This needs internet; a **Local folder** path works offline.
+  > "Any repo. PatchProof clones it shallowly and reads every Python file without running any of it. That's 10 findings: SQL, command and code injection, path traversal, unsafe pickle, and two SSRFs that go through a helper function, each with exact lines."
+- Click **Run full pipeline**. About 4 seconds later, 6 of the 10 are fixed and verified: three SQL injections, the command injection and both SSRFs. With AI on, **AI fix all** fixes the other four (it takes a few minutes).
+  > "We never run their code, so the proof is static. Every fix must compile, the rule must stop firing, nothing new may be flagged, only the flagged function may change, and its signature must stay the same. The fixes go to a copy. Here's all of it as one patch file." Click **All fixes (.patch)** on the Findings page.
+- Back on **Targets**, click **Switch to this target** on **notes-api**, then **Run full pipeline**:
+  > "A second practice app, different weaknesses. SQL injection and path traversal are exploited, patched and verified, and the hardcoded token fix is proven by the whole regression suite."
+- **Switch back to vuln-bank** before the next judge.
+
+### Optional AI segment (+40s, only with AI assist on)
+- On vuln-bank's **Findings** page, open **Information disclosure** (no rule-based fix exists) and click **Ask Gemini to review** (about 10s).
+  > "The model's opinion: real or false positive, and how the attack works. It's labelled as opinion and never changes a status."
+- Click **Generate AI fix** (about 10-20s), then **Run proof checks** (a few seconds).
+  > "The AI wrote this fix, but PatchProof doesn't trust it. It went through the same checks as our rule-based fixes, plus vuln-bank's whole regression suite. If a check fails, the reasons go back to the model, up to three tries, and otherwise nothing is written."
+- On the **Tests** tab, point at the regression line:
+  > "REG-4 fails here, but it failed before this fix too: that's the prompt-injection bug. We only blame a fix for what it breaks."
+- If time allows, **AI deep scan** on the Findings page (about 30s). In our run it found 5 real issues the rules can't see, such as the word 'ignore' unlocking a dump of every user, and an unauthenticated chat route. It also dropped 2 answers that didn't quote real code.
+
 ---
 
 ## Likely judge questions
 
 | Question | Answer |
 |---|---|
-| Do you use an LLM or any API? | No. Detection is AST rules, patching is LibCST, and verification is deterministic test cases. The brief says accuracy and verification matter more than model complexity. vuln-bank's DeepSeek call is replaced by a stand-in that **obeys any attacker text it sees**, which is a stricter test than a real model that might refuse by chance. |
+| Do you use AI? | Optionally: Claude or Gemini reviews findings, deep-scans for logic flaws rules can't see, and writes fixes where no rule applies. The core doesn't need it. Detection is AST rules, patching is LibCST, verification is deterministic. AI output is never trusted on its own: an AI fix must pass the same proof checks as a rule fix (and the exploit and regression runs on practice apps), and an AI finding must quote a real line or it's dropped. The brief says accuracy and verification matter more than model complexity, and this is how we honour it. Inside the vuln-bank harness, DeepSeek is replaced by a stand-in that **obeys any attacker text it sees**, a stricter test than a real model that might refuse by chance. |
 | Why not test against the real model? | Real models are non-deterministic, so the same exploit could pass once and fail the next time. Our verdicts would flip between runs. Assuming the worst case means "blocked" really means the attack never reached the model. |
-| How do you know the patch doesn't break things? | Regression cases run **before** the patch, as a recorded baseline, and **after** it. REG-4 exists specifically to catch over-blocking. 29 automated tests, including false-positive checks. |
-| Is this specific to vuln-bank? | The rules match code patterns (AST), not line numbers, and cases live in one JSON file. A new target means adding rules and cases. The pipeline, evidence model and UI stay the same. |
+| How do you know the patch doesn't break things? | Regression cases run **before** the patch, as a recorded baseline, and **after** it. REG-4 exists specifically to catch over-blocking. Every fix also must keep its function's signature and change nothing outside the flagged code (compared on the syntax tree). There are 138 automated tests, including one per kind of bad fix that the checks must reject. |
+| Is this specific to vuln-bank? | No. The generic rule pack scans any Python folder or Git repo for 11 weakness classes (demo: DSVW, 10 findings). notes-api is a second practice app that gets the full loop. A new practice target is one JSON profile plus a cases file; the rules, pipeline, evidence model and UI stay the same. Own projects are never run: fixes go to a copy and are proven by static checks. On the whole vuln-bank repo, 44 of 51 findings get a rule-based fix and all 44 pass; in a live run, Gemini fixed and verified the remaining rule-less findings too. |
 | What if a patch is wrong? | It must compile before it's written, it's never applied twice, and a failed verification marks the finding **Failed** with the log showing exactly which case broke. **Reset** restores the original code. |
-| Limitations? | Exploits run against the AI module directly, not through the Flask routes and their login. The model is a stand-in. Detection rules are tuned to this module. These are deliberate trade-offs for determinism in 24 hours. |
+| Limitations? | Python only. The rule taint check follows one function plus helpers that forward a URL, so longer flows can be missed (the AI deep scan covers some of that). The Gemini free tier allows 20 requests per model per day. Fixes to your own projects are proven statically, not by exploits. Some shapes, such as dynamic SQL column lists, `exec` and `pickle`, need Claude or a human. For vuln-bank, exploits call the AI module directly rather than through the Flask routes, and the model is a stand-in. These are deliberate trade-offs for determinism in 24 hours. |
+| Can the AI make things worse? | Not silently. Its fix is applied only after it compiles, makes the weakness disappear on a rescan, introduces nothing new, stays inside the flagged function and keeps the signature. On practice apps, the exploits and regression suite run too. Failed attempts are logged and the code is left untouched. |
 
 ## Backup plan (if the live API fails on stage)
 

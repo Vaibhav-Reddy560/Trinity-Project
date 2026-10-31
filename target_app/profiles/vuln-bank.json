@@ -1,0 +1,52 @@
+{
+  "id": "vuln-bank",
+  "kind": "profile",
+  "name": "vuln-bank",
+  "summary": "Deliberately vulnerable banking app. We test its AI customer support assistant.",
+  "module": "AI customer support",
+  "source": "https://github.com/Commando-X/vuln-bank",
+  "commit": "4bb7cd5",
+  "path": "target_app/vuln-bank",
+  "in_scope": [
+    { "file": "ai_agent_deepseek.py", "lines": null, "role": "Scan, exploit, patch and verify" },
+    { "file": "app.py", "lines": [2328, 2476], "role": "Scan only: the AI chat and system-info routes" }
+  ],
+  "out_of_scope": [
+    "Every other file in the vuln-bank snapshot",
+    "Card generation and transaction race conditions",
+    "GraphQL depth limiting",
+    "Behavioural fixes to the system prompt (role override is reported, not patched)"
+  ],
+  "rule_packs": ["ai", "generic"],
+  "harness": { "kind": "vuln-bank-agent", "cases": "target_app/harness/cases.json" },
+  "texts": {
+    "ai_agent_deepseek.py:AI_PROMPT_INJECTION": [
+      "User text goes straight into the model prompt",
+      "Anyone can type instructions that the assistant obeys. Typing \"ignore\" also unlocks a dump of every customer record into the conversation."
+    ],
+    "ai_agent_deepseek.py:AI_BROKEN_AUTH": [
+      "Assistant looks up any customer's balance",
+      "A signed-in customer can ask about someone else by name and the assistant fetches their account number and balance. Nothing checks who is asking."
+    ],
+    "ai_agent_deepseek.py:AI_INFO_DISCLOSURE": [
+      "System prompt and model config are exposed",
+      "get_system_info() returns the full system prompt, the model name and the API endpoint to anyone who can call it."
+    ],
+    "app.py:AI_INFO_DISCLOSURE": [
+      "System info endpoint needs no login",
+      "/api/ai/system-info has no authentication and returns get_system_info(), including the system prompt, to any visitor."
+    ],
+    "ai_agent_deepseek.py:VERBOSE_ERROR_DISCLOSURE": [
+      "Error replies leak an API key preview",
+      "When the model call fails, the reply includes internal details, the full system info and the first ten characters of the API key."
+    ],
+    "app.py:VERBOSE_ERROR_DISCLOSURE": [
+      "Chat errors return raw exception text",
+      "The AI chat routes send the raw exception message and the full system info back to the caller whenever something fails."
+    ],
+    "ai_agent_deepseek.py:AI_ROLE_OVERRIDE": [
+      "System prompt tells the model to obey overrides",
+      "The model is told to follow any request to ignore its instructions or change role. Reported for context; behavioural fixes are out of scope."
+    ]
+  }
+}

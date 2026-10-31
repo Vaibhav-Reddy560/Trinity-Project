@@ -5,9 +5,38 @@ export const typeName: Record<VulnType, string> = {
   AI_BROKEN_AUTH: 'Broken authorization',
   AI_INFO_DISCLOSURE: 'Information disclosure',
   AI_ROLE_OVERRIDE: 'Role override',
-  HARDCODED_CREDENTIALS: 'Hardcoded credentials',
   VERBOSE_ERROR_DISCLOSURE: 'Verbose error messages',
+  SQL_INJECTION: 'SQL injection',
+  COMMAND_INJECTION: 'Command injection',
+  CODE_INJECTION: 'Code injection',
+  PATH_TRAVERSAL: 'Path traversal',
+  SSRF: 'Server-side request forgery',
+  INSECURE_DESERIALIZATION: 'Unsafe deserialization',
+  INSECURE_JWT: 'Unverified JWT',
+  HARDCODED_CREDENTIALS: 'Hardcoded credentials',
+  TLS_VERIFY_DISABLED: 'TLS checks disabled',
+  WEAK_CRYPTO: 'Weak password hashing',
+  DEBUG_MODE: 'Debug mode on',
+  BROKEN_ACCESS_CONTROL: 'Broken access control',
+  MISSING_AUTHENTICATION: 'Missing authentication',
+  XSS: 'Cross-site scripting',
+  OPEN_REDIRECT: 'Open redirect',
+  CSRF: 'Cross-site request forgery',
+  MASS_ASSIGNMENT: 'Mass assignment',
+  INSECURE_FILE_UPLOAD: 'Unsafe file upload',
+  BUSINESS_LOGIC: 'Business logic flaw',
+  RACE_CONDITION: 'Race condition',
+  SENSITIVE_DATA_EXPOSURE: 'Sensitive data exposure',
+  OTHER_WEAKNESS: 'Other weakness',
 }
+
+export const fixSourceLabel = { rule: 'Rule-based patch', ai: 'Written by AI, checked by PatchProof' } as const
+
+/** Short model name for display: "claude-opus-5-5" -> "Claude Opus 5.5", "gemini-2.5-flash" -> "Gemini 2.5 Flash". */
+export const modelName = (id: string) =>
+  (id.startsWith('claude-') ? id.replace(/-(\d+)-(\d+)$/, ' $1.$2').replace(/-(\d+)$/, ' $1') : id)
+    .replace(/-/g, ' ')
+    .replace(/(^|\s)([a-z])/g, (_, s, c) => s + c.toUpperCase())
 
 export const severityLabel: Record<Severity, string> = {
   CRITICAL: 'Critical',

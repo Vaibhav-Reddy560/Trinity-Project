@@ -18,6 +18,131 @@ Append a new entry at the **top** after every session. Keep it short and factual
 
 ---
 
+### 2026-10-31 (evening) — Lead — Vaibhav / Claude
+**Tasks:** G-09 (fix everything the live AI runs exposed)
+**What changed:**
+- **Scanner:** SSRF through module helpers that forward a URL (DSVW's `FETCH` lambda: 2 new findings, both rule-fixed at the call site).
+  - The AI-agent rules report every site; the first keeps its old ID. vuln-bank now has **8** findings: app.py's anonymous chat route leaks exception text too.
+  - The proof checks count every site, so fixing the first site no longer makes the second look "new".
+- **Verifier:**
+  - Regressions are judged against the code without the fix: pre-existing failures (vuln-bank REG-4) are reported, not blamed.
+  - That run is stored as the "before" column for findings with no exploit case.
+- **AI fixes:**
+  - Only the body is taken from the model; the original def line is kept, and decorators may only be added.
+  - Markdown fences and first-line indentation are cleaned up.
+  - Dropped connections, timeouts and busy models fall through to the next Gemini model, with one retry after a wait.
+  - Daily free-tier quota (20 requests per model per day) is remembered and explained.
+- **New:** `POST /ai/fix-all` and an **AI fix all** button.
+
+**Verified:**
+- 138 tests pass.
+- Whole vuln-bank repo: 51 findings, 44/44 rule fixes verified. DSVW: 10 findings, 6/6 rule fixes verified.
+- **Live Gemini fixed and verified all 9 rule-less findings** (5 vuln-bank, 4 DSVW); two needed the feedback loop.
+- Browser e2e green, no page errors.
+
+**Note:** the Gemini key is on the free tier; testing used up today's quota on several models (it resets daily). The newest unused models still answer.
+
+---
+
+### 2026-10-31 (later) — Lead — Vaibhav / Claude
+**Tasks:** G-06..G-08 (stronger fixes, proof checks, optional AI)
+**Files changed:**
+- `engine/checks.py` (new): static proof checks run on every fix, at patch time and on verify
+- `engine/ai.py` (new): Claude review, deep scan, fixes (up to 3 attempts, with failed checks fed back) and re-check
+  - official `anthropic` SDK, structured JSON outputs, prompt caching, server-side fallback
+  - off without a key
+- `engine/patcher.py`:
+  - rule-based fixes for 10 generic types
+  - nearest-site matching for identical code in several functions
+  - LibCST region replacement for AI fixes
+  - `apply_patch` writes only after the checks pass
+- `engine/verifier.py`: the static checks judge each fix on its own change; exploit runs plus the **whole** regression suite on practice targets
+- `engine/generic_rules.py`: sanitisers followed through assignments; the SSRF guard counts as safe; the anchor includes the query's own assignment, so two queries ending in the same `execute_query(query)` are two findings (one was hidden before)
+- `engine/scanner.py`: credentials in test files skipped; an early-return input guard counts as a prompt-injection fix; per finding: `provable`, `fixer`, `detected_by`
+- `engine/models.py`, `engine/harness.py` (`env` for function-call cases), `engine/poc_runner.py` (whole regression suite as baseline)
+- `backend/*`:
+  - new record fields; old records upgraded on read
+  - projects patched in a workspace copy
+  - `/ai/review/{id}`, `/ai/review-all`, `/ai/deep-scan`, `/patches`; `/health` reports AI status
+  - patch allowed without an exploit for non-provable findings; retry after a failed verify
+- `frontend/*`:
+  - AI context and sidebar status
+  - review card; proof-checks list; AI actions and combined patch download on Findings
+  - honest copy for projects; mocks updated
+- `target_app/fixtures/notes-api/cases.json`: `env` block (synthetic `ADMIN_TOKEN`)
+- `conftest.py` (new): tests never call the real API
+- `.env.example` (new); `pyproject.toml`/`uv.lock`: `anthropic`
+- docs: `PROJECT_CONTEXT.md` §1-§8, `README.md` (requirements-to-evidence table), `DEMO.md`, `SCOPE.md`; `AGENT_RULES.md` network rule narrowed for the optional Claude call (requested by the Lead)
+
+**What was built / verified:**
+- `uv run pytest`: 126 passed. That includes every fix shape, the checks rejecting each kind of bad fix, and the AI path with a scripted model.
+- Whole vuln-bank repo as a project: 50 findings; 44 get a rule-based fix and 44/44 pass every check; the source folder is untouched.
+- Live browser run, no page errors:
+  - vuln-bank 2/2 verified with 7/7 checks each
+  - notes-api 3/3, including the token fix
+  - DSVW 4 fixed in ~3s
+  - combined `.patch` download
+  - mock mode
+- AI screens checked in the browser against a scripted model: deep scan, review, AI fix, re-check, report.
+
+**Live AI (later the same day):**
+- The Anthropic key had no credits, so I added Gemini as a second provider (REST, stdlib, model fallback chain). `.env` is set to Gemini.
+- In the live browser run on vuln-bank:
+  - review: 9s
+  - AI fix of information disclosure: 11s, 5/5 static checks
+  - verified with 6/6 checks
+  - deep scan: 28s, 5 real findings, 2 ungrounded answers dropped
+- The verifier now judges regressions against the code without the fix, so pre-existing failures (REG-4) are reported and not blamed on unrelated fixes.
+- 130 tests pass.
+**Contract impact:** Lead-approved and documented in `PROJECT_CONTEXT.md`:
+- new `Vuln` fields
+- `patchable` now means "a fix can be produced"
+- new endpoints and AI deep-scan types
+- engine signatures
+
+**Dependencies added:** `anthropic` (Python).
+**Next steps:**
+- Add `ANTHROPIC_API_KEY`, then rehearse the AI segment in `DEMO.md`.
+
+---
+
+### 2026-10-31 — Lead — Vaibhav / Claude
+**Tasks:** G-01..G-05 (PatchProof is no longer vuln-bank only)
+**Files changed:**
+- `engine/targets.py` (new): target profiles, project profiles, Python file discovery that skips dependency, venv and build folders
+- `engine/generic_rules.py` (new): 11-rule generic pack with per-function taint (parameters plus web input, including `self.path` for `http.server` apps)
+- `engine/scanner.py`: rule packs (`ai`, `generic`), profile text overrides, scan stats, multi-site findings with an `anchor`
+- `engine/patcher.py`: generic LibCST patchers for SQL injection (bound parameters) and path traversal (`_patchproof_safe_join`). They locate the site by content, and `can_patch()` dry-runs them.
+- `engine/harness.py`, `poc_runner.py`, `verifier.py`, `models.py`: take a `profile`; `function-call` harness kind; new `VulnType`s
+- `target_app/profiles/*.json`, `target_app/fixtures/notes-api/*`, `target_app/harness/run_call.py` (new): the vuln-bank profile, plus the notes-api practice target
+- `backend/db.py`, `jobs.py`, `main.py`: active target in a `meta` table; `GET /targets` and `POST /targets/select` (profile id, local folder or https Git URL with a shallow clone into `backend/data/projects/`); a failed selection keeps the previous target
+- `frontend/`: Targets page (switch practice target, scan your own project), target context, all copy driven by the active target
+- `PROJECT_CONTEXT.md` §1, §3, §4, §6-§8, `README.md`, `target_app/SCOPE.md`, `DEMO.md`: documented all of the above
+
+**What was built / verified:**
+- `uv run pytest`: 76 passed. That includes a vulnerable and a safe case per rule, notes-api prove-patch-verify in either order, and a canary showing project code is never executed.
+- vuln-bank still yields exactly 7 findings with the same IDs.
+- Live browser run, no page errors:
+  - notes-api full loop: 2/2 verified
+  - `https://github.com/stamparm/DSVW`: 8 findings
+  - local folder (the whole vuln-bank repo): 14 files scanned
+  - switched back to vuln-bank: 7 findings
+
+**Contract impact:** Lead-approved additive changes, documented in `PROJECT_CONTEXT.md`:
+- new endpoints and `VulnType`s
+- `profile` parameters on the engine functions
+- anchor-based IDs for generic findings
+
+The `Vuln` record shape is unchanged.
+**Dependencies added:** none (`git` CLI is used for clones).
+**Requests to other domains:** none
+**Next steps:**
+- Rehearse the optional "scan your own project" segment in `DEMO.md`.
+- Known limits:
+  - taint is within one function only
+  - SSRF through a lambda (DSVW's `FETCH`) is missed
+  - projects are static only
+
 ### 2026-10-30 — Audit against PS-02 — Vaibhav (Lead) / Claude
 **Why:** re-checked every requirement end to end and probed for false positives.
 

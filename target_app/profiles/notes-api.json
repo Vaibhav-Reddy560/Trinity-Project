@@ -1,0 +1,19 @@
+{
+  "id": "notes-api",
+  "kind": "profile",
+  "name": "notes-api",
+  "summary": "Small deliberately vulnerable notes service: search and file attachments. A local practice fixture.",
+  "module": "Note search and attachments",
+  "source": "Local fixture in target_app/fixtures/notes-api",
+  "commit": null,
+  "path": "target_app/fixtures/notes-api",
+  "in_scope": [
+    { "file": "notes_app.py", "lines": null, "role": "Scan, exploit, patch and verify" }
+  ],
+  "out_of_scope": [
+    "The files/ and secrets/ folders (test data the exploits try to reach)",
+    "Authentication: callers pass their user name directly"
+  ],
+  "rule_packs": ["generic"],
+  "harness": { "kind": "function-call", "cases": "target_app/fixtures/notes-api/cases.json" }
+}

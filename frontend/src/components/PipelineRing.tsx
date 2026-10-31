@@ -32,7 +32,7 @@ function arc(r: number, start: number, end: number) {
   return `M ${a.x} ${a.y} A ${r} ${r} 0 ${end - start > 180 ? 1 : 0} 1 ${b.x} ${b.y}`
 }
 
-const RIM = 'find the flaw  /  prove the fix  /  vuln-bank 4bb7cd5  /  synthetic data only  /  '
+const RIM = 'find the flaw  /  prove the fix  /  evidence first  /  patchproof  /  '
 
 // The signature element: four pipeline stages as arcs around a disc, verdict in the centre.
 export function PipelineRing({ segments, title, subline, titleClass, busy, hot, className, label, hideCenter }: {

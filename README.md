@@ -27,7 +27,7 @@ AI assistance (Claude or Gemini) is optional. It reviews findings, finds logic f
 | The brief asks | PatchProof | Where to check |
 |---|---|---|
 | Identify security weaknesses in deliberately vulnerable sample software | 16 rule types in two packs (LLM-agent and 11 generic classes) on any Python project, plus an optional AI deep scan for logic flaws such as broken access control. Sink rules fire only when input reaches the sink; sanitisers are followed through assignments and test-file credentials are skipped. | [`engine/generic_rules.py`](engine/generic_rules.py), [`engine/scanner.py`](engine/scanner.py); a vulnerable case and a safe case for every rule in [`engine/tests/test_generic.py`](engine/tests/test_generic.py) |
-| Propose or apply a defensive fix | Exact LibCST patches for 10 generic types and both vuln-bank golden-path types. On the whole vuln-bank repo (50 findings), 44 get a rule-based fix and all 44 pass their checks. Claude fixes the rest when AI is on. Every fix is downloadable as one `.patch`. | [`engine/patcher.py`](engine/patcher.py), [`engine/tests/test_fixes.py`](engine/tests/test_fixes.py) |
+| Propose or apply a defensive fix | Exact LibCST patches for 10 generic types and both vuln-bank golden-path types. On the whole vuln-bank repo (51 findings), 44 get a rule-based fix and all 44 pass their checks. The AI model fixes the rest when AI is on: in a live run, Gemini fixed and verified all 9 rule-less findings in vuln-bank and DSVW. **AI fix all** does a whole project in one click. Every fix is downloadable as one `.patch`. | [`engine/patcher.py`](engine/patcher.py), [`engine/tests/test_fixes.py`](engine/tests/test_fixes.py) |
 | Validate that the fix stops the original exploit condition | Practice targets re-run every exploit case against the patched code; the weakness must also stop being detected by a rescan. | [`engine/verifier.py`](engine/verifier.py), [`engine/checks.py`](engine/checks.py), [`target_app/harness/cases.json`](target_app/harness/cases.json) |
 | …while preserving expected application behaviour | The whole regression suite runs before (as a baseline) and after every fix. The static checks also require an unchanged signature and changes confined to the flagged function. REG-4 catches over-blocking fixes. | [`engine/checks.py`](engine/checks.py), REG-1 to REG-4 in [`target_app/SCOPE.md`](target_app/SCOPE.md) |
 | AI is optional; accuracy and verification matter more than model complexity | Everything works without a key. Claude or Gemini can be used. With one, every AI output is gated: fixes must pass every check (up to 3 attempts, with the failed checks fed back), AI findings must quote real lines, and reviews are labelled as opinion. | [`engine/ai.py`](engine/ai.py), AI tests in [`engine/tests/test_fixes.py`](engine/tests/test_fixes.py) |
@@ -75,7 +75,7 @@ The sidebar shows **AI assist on** with the model name. Model defaults:
 - Gemini: 2.5 Flash, about 5-30s per answer. Under load the newer Flash models took over a minute, so they are fallbacks for when 2.5 Flash is busy or out of quota.
 
 `PATCHPROOF_AI_PROVIDER` chooses when both keys are set; `PATCHPROOF_AI_MODEL` pins a model. Then:
-- **AI deep scan** and **AI review all** are on the Findings page.
+- **AI fix all**, **AI deep scan** and **AI review all** are on the Findings page. Fix all works through every open finding, one at a time, with rules first; each fix must pass every check.
 - **Ask Claude/Gemini to review** is on each finding's Summary tab.
 - **Generate AI fix** appears on findings no rule covers.
 
@@ -99,7 +99,7 @@ In the dashboard:
 
 | Command | What it does |
 |---|---|
-| `make test` | Runs 130 engine and API tests. They cover every fix shape, the checks rejecting each kind of bad fix, and the AI path with a scripted model; no test calls the real API. |
+| `make test` | Runs 138 engine and API tests. They cover every fix shape, the checks rejecting each kind of bad fix, and the AI path with a scripted model; no test calls the real API. |
 | `VITE_USE_MOCKS=true make web` | Runs the UI on recorded sample data with no backend (AI off). |
 
 ## How the proof works on practice apps
@@ -115,7 +115,8 @@ In the dashboard:
 ## Limits
 
 - Python only.
-- Taint tracking stays within one function, so flows through other functions or files can be missed. The AI deep scan exists for those.
+- Taint tracking follows one function, plus module helpers that pass a parameter into an HTTP request (such as DSVW's `FETCH`). Longer flows across functions or files can be missed; the AI deep scan exists for those.
+- Gemini's free tier allows 20 requests per model per day. PatchProof spreads requests across many Flash models and says when they are all used up.
 - Your own projects are never run. Their fixes are proven by static checks, not by exploits.
 - AI features need an Anthropic or Gemini API key, and each review, fix or deep-scanned file is an API call.
 - A regression case that already failed before a fix (vuln-bank's REG-4, until prompt injection is fixed) is reported as pre-existing, not blamed on the fix.

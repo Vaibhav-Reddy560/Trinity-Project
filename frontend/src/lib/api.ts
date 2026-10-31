@@ -1,5 +1,5 @@
 import { mockApi } from '@/mocks/mockApi'
-import type { Accepted, Health, Vuln } from './types'
+import type { Accepted, Health, TargetSelection, TargetsResponse, Vuln } from './types'
 
 // The only way the UI talks to the backend. Endpoints: PROJECT_CONTEXT.md §7.
 // Live API by default; set VITE_USE_MOCKS=true to run on in-memory sample data.
@@ -15,19 +15,24 @@ export class ApiError extends Error {
 
 const OFFLINE = 'Cannot reach the PatchProof API on port 8000. Start it with `make api`.'
 
-async function request<T>(path: string, method: 'GET' | 'POST' = 'GET'): Promise<T> {
+async function request<T>(path: string, method: 'GET' | 'POST' = 'GET', body?: unknown, as: 'json' | 'text' = 'json'): Promise<T> {
   let res: Response
   try {
-    res = await fetch(`/api/v1${path}`, { method })
+    res = await fetch(`/api/v1${path}`, body === undefined ? { method } : {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
   } catch {
     throw new ApiError(0, OFFLINE)
   }
   if (!res.ok) {
-    const body = await res.json().catch(() => null)
-    if (!body?.detail && res.status >= 500) throw new ApiError(res.status, OFFLINE)
-    throw new ApiError(res.status, body?.detail ?? res.statusText)
+    const err = await res.json().catch(() => null)
+    const detail = typeof err?.detail === 'string' ? err.detail : null
+    if (!detail && res.status >= 500) throw new ApiError(res.status, OFFLINE)
+    throw new ApiError(res.status, detail ?? res.statusText)
   }
-  return res.json()
+  return as === 'text' ? ((await res.text()) as T) : res.json()
 }
 
 const liveApi = {
@@ -41,6 +46,14 @@ const liveApi = {
   verify: (id: string) => request<Accepted>(`/verify/${id}`, 'POST'),
   runAll: () => request<Accepted>('/run-all', 'POST'),
   reset: () => request<Accepted>('/reset', 'POST'),
+  targets: () => request<TargetsResponse>('/targets'),
+  selectTarget: (selection: TargetSelection) => request<Accepted>('/targets/select', 'POST', selection),
+  review: (id: string) => request<Accepted>(`/ai/review/${id}`, 'POST'),
+  reviewAll: () => request<Accepted>('/ai/review-all', 'POST'),
+  deepScan: () => request<Accepted>('/ai/deep-scan', 'POST'),
+  fixAll: () => request<Accepted>('/ai/fix-all', 'POST'),
+  /** Every applied fix as one unified diff, ready for `git apply`. */
+  patches: () => request<string>('/patches', 'GET', undefined, 'text'),
 }
 
 export const api: Omit<typeof liveApi, 'mode'> & { mode: 'live' | 'mock' } = USE_MOCKS ? mockApi : liveApi
