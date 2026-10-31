@@ -134,6 +134,8 @@ export interface ScanStats {
   files_scanned: number
   files_skipped: number
   parse_errors: number
+  /** Files read per language, e.g. { python: 14, javascript: 4, html: 15 }. */
+  by_language?: Record<string, number>
 }
 
 export interface TargetInfo {
@@ -163,6 +165,9 @@ export interface DeepScanReport {
   dropped: number
   errors: string[]
   model: string
+  /** Files beyond the per-scan request cap, listed so nothing is skipped silently. */
+  unread?: string[]
+  requests?: number
 }
 
 export interface TargetsResponse {

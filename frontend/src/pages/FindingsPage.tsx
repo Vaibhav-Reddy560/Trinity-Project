@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import type { Pending } from '@/hooks/useVulns'
 import { aiName, useAI } from '@/lib/aiContext'
 import { api } from '@/lib/api'
-import { SEVERITIES, codeLocation, downloadFile, modelName, severityLabel, typeName } from '@/lib/format'
+import { SEVERITIES, codeLocation, downloadFile, filesRead, modelName, severityLabel, typeName } from '@/lib/format'
 import { verdictFor, type Verdict } from '@/lib/pipeline'
 import { href } from '@/lib/router'
 import type { Action, Severity, Vuln } from '@/lib/types'
@@ -100,6 +100,7 @@ export function FindingsPage({ vulns, pending, onRun }: { vulns: Vuln[]; pending
         }
       />
 
+      {target.kind === 'profile' && target.stats && <p className="mb-2 text-sm text-ash">{filesRead(target.stats)}</p>}
       {!ai.enabled && (
         <p className="mb-4 text-sm text-ash">
           AI assist is off: rule-based scanning and fixes still work. {ai.reason}
@@ -111,6 +112,7 @@ export function FindingsPage({ vulns, pending, onRun }: { vulns: Vuln[]; pending
           Last AI deep scan by {modelName(target.deep_scan.model)}: {target.deep_scan.files} file{target.deep_scan.files === 1 ? '' : 's'} read,{' '}
           {target.deep_scan.added} new finding{target.deep_scan.added === 1 ? '' : 's'}
           {target.deep_scan.dropped > 0 && `, ${target.deep_scan.dropped} answer${target.deep_scan.dropped === 1 ? '' : 's'} dropped for not matching the code`}
+          {target.deep_scan.unread?.length ? `, ${target.deep_scan.unread.length} file${target.deep_scan.unread.length === 1 ? '' : 's'} not read (request cap)` : ''}
           {target.deep_scan.errors.length > 0 && <span className="text-ember">. Errors: {target.deep_scan.errors.join('; ')}</span>}.
         </p>
       )}
@@ -122,7 +124,7 @@ export function FindingsPage({ vulns, pending, onRun }: { vulns: Vuln[]; pending
         {target.kind === 'project' && (
           <p className="mb-4 flex flex-wrap items-center gap-x-2 border border-amber/50 bg-amber/10 px-4 py-3 text-sm text-bone">
             <span className="font-semibold text-amber">Your project is never run.</span>
-            {target.stats ? `${target.stats.files_scanned} Python files read.` : ''} No exploits are attempted: fixes go to a copy and are
+            {filesRead(target.stats)} No exploits are attempted: fixes go to a copy and are
             proven by static checks. Your folder is never changed.
           </p>
         )}

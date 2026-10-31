@@ -26,8 +26,8 @@ AI assistance (Claude or Gemini) is optional. It reviews findings, finds logic f
 
 | The brief asks | PatchProof | Where to check |
 |---|---|---|
-| Identify security weaknesses in deliberately vulnerable sample software | 16 rule types in two packs (LLM-agent and 11 generic classes) on any Python project, plus an optional AI deep scan for logic flaws such as broken access control. Sink rules fire only when input reaches the sink; sanitisers are followed through assignments and test-file credentials are skipped. | [`engine/generic_rules.py`](engine/generic_rules.py), [`engine/scanner.py`](engine/scanner.py); a vulnerable case and a safe case for every rule in [`engine/tests/test_generic.py`](engine/tests/test_generic.py) |
-| Propose or apply a defensive fix | Exact LibCST patches for 10 generic types and both vuln-bank golden-path types. On the whole vuln-bank repo (51 findings), 44 get a rule-based fix and all 44 pass their checks. The AI model fixes the rest when AI is on: in a live run, Gemini fixed and verified all 9 rule-less findings in vuln-bank and DSVW. **AI fix all** does a whole project in one click. Every fix is downloadable as one `.patch`. | [`engine/patcher.py`](engine/patcher.py), [`engine/tests/test_fixes.py`](engine/tests/test_fixes.py) |
+| Identify security weaknesses in deliberately vulnerable sample software | Any codebase in any common language: Python gets syntax-tree rules (16 types), and JavaScript/TypeScript, PHP, Java, Go, Ruby, C#, HTML templates and shell get pattern rules (60+). An optional AI deep scan reads every file for logic flaws such as broken access control. Rules need input to reach the sink; tests, dependencies, minified bundles and dev configs are skipped. Checked on DVWA (PHP), NodeGoat (Node.js), RailsGoat (Ruby), DSVW and vuln-bank. | [`engine/generic_rules.py`](engine/generic_rules.py), [`engine/lang_rules.py`](engine/lang_rules.py); a vulnerable and a safe case per rule in [`engine/tests/test_generic.py`](engine/tests/test_generic.py) and [`engine/tests/test_languages.py`](engine/tests/test_languages.py) |
+| Propose or apply a defensive fix | Exact LibCST patches for 10 generic types and both vuln-bank golden-path types. On the whole vuln-bank repo (66 findings across Python, JavaScript and HTML), 44 get a rule-based fix and all 44 pass their checks. The AI model fixes the rest, in any language, when AI is on: in a live run, Gemini fixed and verified all 9 rule-less findings in vuln-bank and DSVW. **AI fix all** does a whole project in one click. Every fix is downloadable as one `.patch`. | [`engine/patcher.py`](engine/patcher.py), [`engine/tests/test_fixes.py`](engine/tests/test_fixes.py) |
 | Validate that the fix stops the original exploit condition | Practice targets re-run every exploit case against the patched code; the weakness must also stop being detected by a rescan. | [`engine/verifier.py`](engine/verifier.py), [`engine/checks.py`](engine/checks.py), [`target_app/harness/cases.json`](target_app/harness/cases.json) |
 | …while preserving expected application behaviour | The whole regression suite runs before (as a baseline) and after every fix. The static checks also require an unchanged signature and changes confined to the flagged function. REG-4 catches over-blocking fixes. | [`engine/checks.py`](engine/checks.py), REG-1 to REG-4 in [`target_app/SCOPE.md`](target_app/SCOPE.md) |
 | AI is optional; accuracy and verification matter more than model complexity | Everything works without a key. Claude or Gemini can be used. With one, every AI output is gated: fixes must pass every check (up to 3 attempts, with the failed checks fed back), AI findings must quote real lines, and reviews are labelled as opinion. | [`engine/ai.py`](engine/ai.py), AI tests in [`engine/tests/test_fixes.py`](engine/tests/test_fixes.py) |
@@ -46,9 +46,9 @@ Pick a target on the **Targets** page.
 
 | Target | What you get |
 |---|---|
-| **vuln-bank** (default) | The AI customer-support module of the deliberately vulnerable [vuln-bank](https://github.com/Commando-X/vuln-bank) app, pinned at `4bb7cd5`. Find, exploit, patch, verify. |
+| **vuln-bank** (default) | The whole deliberately vulnerable [vuln-bank](https://github.com/Commando-X/vuln-bank) app, pinned at `4bb7cd5`: Python, JavaScript and HTML. Its AI customer-support module is also proven with live exploits. |
 | **notes-api** | A small deliberately vulnerable notes service in `target_app/fixtures/`. SQL injection and path traversal are exploited, fixed and verified. A hardcoded token is fixed and proven by the static checks and the regression suite. |
-| **Your own project** | Any local folder or public `https://` Git repository. Every `.py` file is scanned. **Your code is never run**, and your folder is never changed: fixes go to a copy, are proven by static checks, and download as one patch. |
+| **Your own project** | Any local folder or public `https://` Git repository. Every source file is scanned, whatever the language. **Your code is never run**, and your folder is never changed: fixes go to a copy, are proven by static checks, and download as one patch. |
 
 ### Fixes, by type
 
@@ -114,7 +114,8 @@ In the dashboard:
 
 ## Limits
 
-- Python only.
+- Rule-based (exact, mechanical) fixes exist for Python. Other languages are fixed by the AI model under language-neutral checks: syntax (where `node`, `php`, `ruby`, `bash` or `gofmt` is installed, else bracket balance), weakness gone on rescan, nothing new flagged, only the flagged lines changed.
+- Pattern rules outside Python see one statement at a time; the AI deep scan covers flows across functions and files.
 - Taint tracking follows one function, plus module helpers that pass a parameter into an HTTP request (such as DSVW's `FETCH`). Longer flows across functions or files can be missed; the AI deep scan exists for those.
 - Gemini's free tier allows 20 requests per model per day. PatchProof spreads requests across many Flash models and says when they are all used up.
 - Your own projects are never run. Their fixes are proven by static checks, not by exploits.

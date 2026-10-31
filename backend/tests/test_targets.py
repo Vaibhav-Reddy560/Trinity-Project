@@ -48,7 +48,7 @@ def test_switching_back_restores_the_other_targets_code(client):
     client.post(f"{API}/targets/select", json={"id": "vuln-bank"})
     assert (db.workspace_dir() / "ai_agent_deepseek.py").is_file()
     assert not (db.workspace_dir() / "notes_app.py").exists()
-    assert len(vulns(client)) == 8
+    assert len(vulns(client)) >= 50 and any(v["file_path"] == "ai_agent_deepseek.py" for v in vulns(client))
 
 
 def test_scan_a_local_project_without_running_or_changing_it(client, tmp_path: Path):
@@ -141,7 +141,7 @@ def test_ai_review_deep_scan_and_fix_on_a_local_project(client, tmp_path: Path):
     def idor_answer(text: str) -> dict:
         if "note = NOTES[note_id]" not in text:
             return {"findings": []}
-        return {"findings": [{"type": "BROKEN_ACCESS_CONTROL", "severity": "HIGH", "cwe": "CWE-639", "title": "Any user reads any note",
+        return {"findings": [{"file": "notes.py", "type": "BROKEN_ACCESS_CONTROL", "severity": "HIGH", "cwe": "CWE-639", "title": "Any user reads any note",
                               "rationale": "No ownership check.", "line_start": 7, "line_end": 7, "evidence_line": "note = NOTES[note_id]"}]}
 
     project = tmp_path / "my-app"

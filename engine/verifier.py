@@ -5,7 +5,7 @@ from pathlib import Path
 from engine.checks import check, failed, static_checks
 from engine.harness import cases_for, describe, evaluate, log, query_lines, regression_cases
 from engine.models import Check, LogLine, Vuln, VerifyResult
-from engine.targets import load_profile
+from engine.targets import harness_files, load_profile
 
 _LEVEL = {True: "SUCCESS", False: "ERROR", None: "INFO"}
 
@@ -54,7 +54,10 @@ def verify_fix(workspace: str, vuln: Vuln, profile: dict | None = None) -> Verif
 
     security_blocked = regression_passed = None
     baseline_log: list[LogLine] = []
-    if profile.get("harness"):
+    exercised = harness_files(profile)
+    if profile.get("harness") and exercised is not None and vuln["file_path"] not in exercised:
+        lines.append(log("INFO", f"The target's test cases don't run {vuln['file_path']}, so this fix is proven by the static checks alone"))
+    elif profile.get("harness"):
         security = cases_for(vuln["type"], "security", profile)
         regression = regression_cases(profile)
         blocked = passed = 0

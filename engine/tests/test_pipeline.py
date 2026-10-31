@@ -22,7 +22,7 @@ def findings() -> dict:
 
 
 def test_scanner_finds_every_in_scope_weakness(findings):
-    assert set(findings) == {
+    assert {
         (AGENT, "AI_PROMPT_INJECTION"),
         (AGENT, "AI_BROKEN_AUTH"),
         (AGENT, "AI_INFO_DISCLOSURE"),
@@ -30,7 +30,9 @@ def test_scanner_finds_every_in_scope_weakness(findings):
         (AGENT, "AI_ROLE_OVERRIDE"),
         ("app.py", "AI_INFO_DISCLOSURE"),
         ("app.py", "VERBOSE_ERROR_DISCLOSURE"),
-    }
+    } <= set(findings)
+    # The whole app is scanned, every language, not just the AI module.
+    assert {("auth.py", "INSECURE_JWT"), ("app.py", "SQL_INJECTION"), ("static/dashboard.js", "XSS"), ("templates/blog.html", "XSS")} <= set(findings)
 
 
 def test_scanner_reports_exact_spans(findings):
@@ -41,8 +43,11 @@ def test_scanner_reports_exact_spans(findings):
     assert pi["original_code"].lstrip().startswith("if self._should_include_database_info(user_message) or")
     assert ba["original_code"].lstrip().startswith('if "balance" in message_lower:')
     golden = {"AI_PROMPT_INJECTION", "AI_BROKEN_AUTH"}
-    assert all(f["provable"] == (f["type"] in golden) for f in findings.values())
-    assert all(f["fixer"] == ("rule" if f["type"] in golden else None) for f in findings.values()), "AI is off in tests"
+    assert all(f["provable"] == (f["type"] in golden and f["file_path"] == AGENT) for f in findings.values()), \
+        "only the file the exploit cases run can be proven by them"
+    agent = [f for f in findings.values() if f["file_path"] == AGENT]
+    assert all(f["fixer"] == ("rule" if f["type"] in golden else None) for f in agent), "AI is off in tests"
+    assert all(f["fixer"] is None for f in findings.values() if not f["file_path"].endswith(".py")), "no AI, no fix outside Python"
 
 
 @pytest.mark.parametrize("vtype", ["AI_PROMPT_INJECTION", "AI_BROKEN_AUTH"])

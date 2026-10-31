@@ -9,6 +9,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from engine.languages import language_of
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROFILES_DIR = REPO_ROOT / "target_app" / "profiles"
 DEFAULT_PROFILE = "vuln-bank"
@@ -16,10 +18,12 @@ DEFAULT_PROFILE = "vuln-bank"
 SKIP_DIRS = {
     ".git", ".hg", ".svn", "node_modules", ".venv", "venv", "env", ".env", "__pycache__", "site-packages",
     "dist", "build", ".tox", ".nox", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".idea", ".vscode",
+    "vendor", "bower_components", "coverage", ".next", ".nuxt", ".gradle", ".terraform", "Pods", ".cache", "target",
 }
 MAX_FILES = 3000
 MAX_FILE_BYTES = 1_000_000
-ALL_PYTHON = "**/*.py"
+ALL_SOURCE = "**/*"  # every source file in a language PatchProof reads (engine/languages.py)
+ALL_PYTHON = ALL_SOURCE  # the old name, kept for profiles written before other languages were supported
 
 
 def list_profiles() -> list[dict]:
@@ -39,15 +43,14 @@ def project_profile(root: Path, name: str, source: str) -> dict:
         "kind": "project",
         "name": name,
         "summary": "Your project, scanned statically. Its code is read, never run.",
-        "module": "Whole project (Python)",
+        "module": "Whole project (every language)",
         "source": source,
         "commit": None,
         "path": str(root.resolve()),
-        "in_scope": [{"file": ALL_PYTHON, "lines": None, "role": "Static scan only: findings are detected, not proven"}],
+        "in_scope": [{"file": ALL_SOURCE, "lines": None, "role": "Every source file: scanned, fixed in a copy and proven by static checks"}],
         "out_of_scope": [
-            "Non-Python files",
-            "Dependencies, virtual environments and build output",
-            "Exploits and automatic patches: these only run on curated practice targets",
+            "Dependencies, virtual environments, vendored code and build output",
+            "Exploits: your code is never run, so fixes are proven by static checks instead",
         ],
         "rule_packs": ["ai", "generic"],
         "harness": None,
@@ -67,6 +70,12 @@ def cases_for_profile(profile: dict) -> list[dict]:
     return json.loads((REPO_ROOT / harness["cases"]).read_text())["cases"]
 
 
+def harness_files(profile: dict) -> set[str] | None:
+    """Files the target's exploit and regression cases actually run. Only fixes there can be proven by them."""
+    harness = profile.get("harness") or {}
+    return set(harness["files"]) if "files" in harness else None
+
+
 def harness_env(profile: dict) -> dict[str, str]:
     """Configuration the practice app reads from its environment, supplied to every case the way a deployment would."""
     harness = profile.get("harness")
@@ -76,7 +85,13 @@ def harness_env(profile: dict) -> dict[str, str]:
 
 
 def iter_python_files(root: Path) -> tuple[list[str], int]:
-    """Relative paths of Python files to scan, plus how many were skipped for size or the file cap."""
+    """Python files only. Kept for callers that need just those; scanning uses iter_source_files."""
+    files, skipped = iter_source_files(root)
+    return [f for f in files if f.endswith(".py")], skipped
+
+
+def iter_source_files(root: Path) -> tuple[list[str], int]:
+    """Relative paths of every source file in a supported language, plus how many were skipped for size or the cap."""
     found: list[str] = []
     skipped = 0
     stack = [root]
@@ -92,7 +107,7 @@ def iter_python_files(root: Path) -> tuple[list[str], int]:
             if entry.is_dir():
                 if entry.name not in SKIP_DIRS and not entry.name.endswith(".egg-info"):
                     stack.append(entry)
-            elif entry.suffix == ".py":
+            elif language_of(entry.name):
                 if entry.stat().st_size > MAX_FILE_BYTES or len(found) >= MAX_FILES:
                     skipped += 1
                 else:
@@ -103,8 +118,9 @@ def iter_python_files(root: Path) -> tuple[list[str], int]:
 def in_scope_files(profile: dict, root: Path) -> list[tuple[str, tuple[int, int] | None]]:
     files: list[tuple[str, tuple[int, int] | None]] = []
     for entry in profile["in_scope"]:
-        if entry["file"] == ALL_PYTHON:
-            files += [(rel, None) for rel in iter_python_files(root)[0]]
+        if entry["file"] == ALL_SOURCE:
+            files += [(rel, None) for rel in iter_source_files(root)[0]]
         else:
             files.append((entry["file"], tuple(entry["lines"]) if entry["lines"] else None))
-    return files
+    seen: set[str] = set()
+    return [f for f in files if not (f[0] in seen or seen.add(f[0]))]  # a file listed twice is scanned once

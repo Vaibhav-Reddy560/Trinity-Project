@@ -34,7 +34,7 @@ def test_scan_populates_findings_in_contract_shape(client):
     assert r.status_code == 202 and r.json() == {"accepted": True, "action": "scan"}
 
     found = vulns(client)
-    assert len(found) == 8
+    assert len(found) >= 50, "the whole app is scanned"
     assert all(set(v) == SCHEMA_KEYS for v in found)
     assert found[0]["type"] == "AI_PROMPT_INJECTION" and found[0]["severity"] == "CRITICAL"
     assert all(v["status"] == "OPEN" and v["poc_status"] == "NOT_RUN" for v in found)
@@ -96,16 +96,19 @@ def test_run_all_verifies_every_patchable_finding(client):
     assert client.post(f"{API}/run-all").status_code == 202
     found = vulns(client)
     patchable = [v for v in found if v["patchable"]]
-    assert len(patchable) == 2
-    assert all(v["status"] == "VERIFIED" for v in patchable)
+    assert len(patchable) >= 40 and sum(v["provable"] for v in patchable) == 2
+    assert all(v["status"] == "VERIFIED" for v in patchable), [(v["type"], v["file_path"], v["status"]) for v in patchable if v["status"] != "VERIFIED"]
+    assert all(v["poc_status"] == "BLOCKED" for v in patchable if v["provable"])
     assert all(v["status"] == "OPEN" for v in found if not v["patchable"])
 
 
 def test_rescan_keeps_state_and_does_not_duplicate(client):
+    client.post(f"{API}/scan")
+    before = len(vulns(client))
     client.post(f"{API}/run-all")
     client.post(f"{API}/scan")
     found = vulns(client)
-    assert len(found) == 8
+    assert len(found) == before
     assert by_type(client, "AI_PROMPT_INJECTION")["status"] == "VERIFIED"
 
 

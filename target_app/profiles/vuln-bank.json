@@ -2,23 +2,39 @@
   "id": "vuln-bank",
   "kind": "profile",
   "name": "vuln-bank",
-  "summary": "Deliberately vulnerable banking app. We test its AI customer support assistant.",
-  "module": "AI customer support",
+  "summary": "Deliberately vulnerable banking app, scanned in full. The AI customer-support module also gets live exploits.",
+  "module": "Whole app (AI support module proven by exploits)",
   "source": "https://github.com/Commando-X/vuln-bank",
   "commit": "4bb7cd5",
   "path": "target_app/vuln-bank",
   "in_scope": [
-    { "file": "ai_agent_deepseek.py", "lines": null, "role": "Scan, exploit, patch and verify" },
-    { "file": "app.py", "lines": [2328, 2476], "role": "Scan only: the AI chat and system-info routes" }
+    {
+      "file": "**/*",
+      "lines": null,
+      "role": "Every source file: scanned, fixed in a copy and proven by static checks"
+    },
+    {
+      "file": "ai_agent_deepseek.py",
+      "lines": null,
+      "role": "Also proven: exploits and regression cases run against it"
+    }
   ],
   "out_of_scope": [
-    "Every other file in the vuln-bank snapshot",
-    "Card generation and transaction race conditions",
-    "GraphQL depth limiting",
-    "Behavioural fixes to the system prompt (role override is reported, not patched)"
+    "Dependencies and vendored code",
+    "Exploits outside the AI support module: they need the app's Postgres database, so those fixes are proven by static checks",
+    "Behavioural fixes to the system prompt wording (role override is reported, not rewritten)"
   ],
-  "rule_packs": ["ai", "generic"],
-  "harness": { "kind": "vuln-bank-agent", "cases": "target_app/harness/cases.json" },
+  "rule_packs": [
+    "ai",
+    "generic"
+  ],
+  "harness": {
+    "kind": "vuln-bank-agent",
+    "cases": "target_app/harness/cases.json",
+    "files": [
+      "ai_agent_deepseek.py"
+    ]
+  },
   "texts": {
     "ai_agent_deepseek.py:AI_PROMPT_INJECTION": [
       "User text goes straight into the model prompt",

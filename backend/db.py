@@ -10,7 +10,7 @@ from pathlib import Path
 from tinydb import Query, TinyDB
 
 from engine.patcher import unified_diff
-from engine.targets import iter_python_files, load_profile, source_root
+from engine.targets import iter_source_files, load_profile, source_root
 
 ROOT = Path(__file__).resolve().parent
 PRISTINE_DIR = ROOT.parent / "target_app" / "vuln-bank"
@@ -177,12 +177,12 @@ def reset_workspace() -> None:
         if ws.exists():
             shutil.rmtree(ws)
         if target["kind"] == "project":
-            for rel in iter_python_files(src)[0]:
+            for rel in iter_source_files(src)[0]:
                 (ws / rel).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src / rel, ws / rel)
             ws.mkdir(parents=True, exist_ok=True)
         else:
-            shutil.copytree(src, ws, ignore=shutil.ignore_patterns("static", "templates", "tests", "__pycache__"))
+            shutil.copytree(src, ws, ignore=shutil.ignore_patterns("__pycache__", ".git", "node_modules", ".venv", "venv"))
         (ws / WORKSPACE_MARKER).write_text(target["id"])
 
 

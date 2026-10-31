@@ -66,7 +66,7 @@ export function OverviewPage({ vulns, pending, onRun }: {
             <p className="mt-4 max-w-[62ch] text-base leading-relaxed text-bone/80">
               {isProject
                 ? <>PatchProof is checking <span className="text-bone">{target.name}</span> without ever running it: each weakness is located to the exact lines, fixed in a copy by a rule{ai.enabled ? ` or by ${aiName(ai)}` : ''}, and every fix is proven by static checks before it counts.</>
-                : <>PatchProof finds weaknesses in any Python project and fixes them{ai.enabled ? ` with rules or ${aiName(ai)}` : ''}. On this practice target, <span className="text-bone">{target.name}</span>, it also proves each one with a live exploit, and a fix only counts when the exploit is blocked and normal use still works.</>}
+                : <>PatchProof finds weaknesses in any codebase (Python, JavaScript/TypeScript, PHP, Java, Go, Ruby, C# and more) and fixes them{ai.enabled ? ` with rules or ${aiName(ai)}` : ''}. On this practice target, <span className="text-bone">{target.name}</span>, it also proves each one with a live exploit, and a fix only counts when the exploit is blocked and normal use still works.</>}
             </p>
             <div className="mt-7 flex flex-wrap gap-2">
               {vulns.length === 0 ? (

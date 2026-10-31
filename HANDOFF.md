@@ -18,6 +18,35 @@ Append a new entry at the **top** after every session. Keep it short and factual
 
 ---
 
+### 2026-10-31 (night) — Lead — Vaibhav / Claude
+**Tasks:** G-10 (every language, whole app)
+**What changed:**
+- **Languages:** `engine/languages.py` and `engine/lang_rules.py`.
+  - Python keeps the syntax-tree rules.
+  - JavaScript/TypeScript, PHP, Java/Kotlin, Go, Ruby, C#, HTML and shell get about 64 pattern rules: SQL/NoSQL, command and code injection, XSS, path traversal, SSRF, open redirect, deserialization, weak crypto, TLS, JWT, CORS, CSRF, mass assignment, debug and secrets.
+  - Each rule reads the whole statement.
+  - Test files, minified or vendored code, and dev configs are skipped.
+- **Proof checks for other languages** (`checks.text_checks`): syntax (`node --check`, `php -l`, `ruby -c`, `bash -n`, `gofmt` when installed), weakness gone on rescan, nothing new flagged, change confined to the flagged lines.
+- **AI:** fixes and deep scan work on any language.
+  - Fixes replace exactly the flagged lines.
+  - The deep scan reads every source file in batches, and lists any it could not read.
+- **vuln-bank is scanned as a whole app.** `harness.files` limits exploit/regression runs to the files the test cases actually execute. Everything else is proven by the static checks.
+
+**Verified:**
+- Tests pass.
+- vuln-bank: 66 findings (51 Python, 10 JS, 5 HTML). Run-all gives 44 verified; the other 22 need an AI fix.
+- Real repos:
+  - DVWA (PHP): 63 findings
+  - NodeGoat (Node): 9 findings, all real
+  - RailsGoat (Ruby): 30 findings, all real
+- Live Gemini fixed NodeGoat's `eval(req.body.preTax)`. All 4 checks passed, including `node --check`.
+
+**Limits:**
+- Rule-based fixes are Python only; other languages are fixed by the AI.
+- Pattern rules see one statement at a time, with no data flow across files.
+
+---
+
 ### 2026-10-31 (evening) — Lead — Vaibhav / Claude
 **Tasks:** G-09 (fix everything the live AI runs exposed)
 **What changed:**

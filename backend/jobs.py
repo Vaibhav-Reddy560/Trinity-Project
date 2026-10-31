@@ -12,7 +12,7 @@ from pathlib import Path
 
 from backend import db
 from engine import ai, apply_patch, run_poc, scan_repository, verify_fix
-from engine.targets import iter_python_files, load_profile, project_profile, source_root
+from engine.targets import iter_source_files, load_profile, project_profile, source_root
 
 log = logging.getLogger("patchproof.jobs")
 
@@ -62,7 +62,7 @@ def scan() -> None:
     stats: dict = {}
     db.add_findings(scan_repository(_ws(), target, stats))
     if target["kind"] == "project":
-        stats["files_skipped"] = iter_python_files(source_root(target))[1]
+        stats["files_skipped"] = iter_source_files(source_root(target))[1]
     db.set_scan_stats(stats)
 
 
@@ -168,7 +168,8 @@ def deep_scan() -> None:
     report = ai.deep_scan(_ws(), db.active_target(), db.list_vulns())
     added = db.add_findings(report["findings"])
     db.set_deep_scan_report({"at": db.now(), "files": report["files"], "added": added, "dropped": report["dropped"],
-                             "errors": report["errors"], "model": report["model"]})
+                             "errors": report["errors"], "model": report["model"], "unread": report["unread"],
+                             "requests": report["requests"]})
 
 
 def reset() -> None:

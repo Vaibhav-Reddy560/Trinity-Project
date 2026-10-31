@@ -99,7 +99,7 @@ export function ScopePage({ pending, apiState, onSelect }: {
             {problem && <p role="alert" className="text-sm text-ember">{problem}</p>}
             {error && !busy && <p role="alert" className="border border-ember/60 bg-ember/10 px-3 py-2 text-sm text-ember">{error.message}</p>}
             <ul id="project-help" className="space-y-1 text-xs text-ash">
-              <li>Python files are analysed. Dependencies, virtual environments and build output are skipped.</li>
+              <li>Every source file is analysed: Python, JavaScript/TypeScript, PHP, Java, Go, Ruby, C#, HTML and more. Dependencies, vendored code and build output are skipped.</li>
               <li>Your code is read, never run, and your folder is never changed: fixes go to a copy you can download as one patch.</li>
               <li>{live ? 'Git repositories are cloned shallowly into PatchProof’s data folder.' : 'Needs the live API: start it with make api.'}</li>
             </ul>
@@ -142,7 +142,7 @@ export function ScopePage({ pending, apiState, onSelect }: {
                 <tbody className="divide-y divide-border/60">
                   {active.in_scope.map((f) => (
                     <tr key={f.file}>
-                      <td className="py-2.5 pr-4 font-semibold text-bone">{f.file === '**/*.py' ? 'Every Python file' : f.file}</td>
+                      <td className="py-2.5 pr-4 font-semibold text-bone">{f.file === '**/*' || f.file === '**/*.py' ? 'Every source file' : f.file}</td>
                       <td className="py-2.5 pr-4 text-bone/85 tabular-nums">{scopeLines(f.lines)}</td>
                       <td className="py-2.5 text-ash">{f.role}</td>
                     </tr>

@@ -28,8 +28,9 @@ import libcst as cst
 
 from engine.checks import failed, functions, locate, region_for, static_checks
 from engine.harness import log, now
+from engine.languages import LANG_LABEL, is_python, is_test_file, language_of
 from engine.models import AIReview, Finding, LogLine, Vuln
-from engine.patcher import PatchError, replace_region
+from engine.patcher import PatchError, replace_lines, replace_region
 from engine.targets import in_scope_files
 
 DEFAULT_MODEL = "claude-opus-5-5"
@@ -47,8 +48,9 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:ge
 PROVIDER_NAME = {"anthropic": "Claude", "gemini": "Gemini"}
 MAX_ATTEMPTS = 3
 MAX_FILE_LINES = 4000
-DEEP_SCAN_MAX_FILES = 12
-DEEP_SCAN_MAX_FINDINGS = 8
+DEEP_SCAN_BATCH_CHARS = 90_000  # source text per request: many small files share one request
+DEEP_SCAN_MAX_REQUESTS = 40  # per scan; anything beyond is reported as unread, never silently skipped
+DEEP_SCAN_MAX_FINDINGS = 15
 WORKERS = 4
 
 GENERIC_TYPES = [
@@ -61,7 +63,9 @@ DEEP_TYPES = {
     "RACE_CONDITION": "CWE-362", "SENSITIVE_DATA_EXPOSURE": "CWE-200", "OTHER_WEAKNESS": "CWE-693",
 }
 SEVERITIES = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
-WEB_HINT = re.compile(r"@\w+\.(route|get|post|put|patch|delete)\b|\brequest\.|def do_(GET|POST)|APIRouter|Blueprint")
+WEB_HINT = re.compile(
+    r"@\w+\.(route|get|post|put|patch|delete)\b|\brequest\.|def do_(GET|POST)|APIRouter|Blueprint|\bapp\.(get|post|use)\s*\(|"
+    r"\$_(GET|POST|REQUEST)|@(Get|Post|Request)Mapping|http\.HandleFunc|\bparams\[|\[Http(Get|Post)\]|router\.|express\(")
 
 
 class AIError(Exception):
@@ -339,7 +343,7 @@ def _pick(value, allowed):
 
 REVIEW_SYSTEM = """You are the application-security reviewer inside PatchProof, a tool that helps small teams decide which static-analysis findings are real and fix them safely.
 
-You get one Python file with line numbers and one finding from PatchProof's rule-based scanner. Decide whether it is a real, exploitable weakness in this code.
+You get one source file (any language) with line numbers and one finding from PatchProof's rule-based scanner. Decide whether it is a real, exploitable weakness in this code.
 
 - Judge only from the code shown. Trace where the flagged values come from and where they go.
 - "confirmed": data an attacker can influence (request data, arguments fed by callers, uploaded files) reaches the flagged code and can cause the stated harm.
@@ -395,15 +399,16 @@ def review_many(items: list[tuple[str, Vuln]]) -> list[AIReview | dict]:
 
 # ---------- fixes ----------
 
-FIX_SYSTEM = """You write minimal, behaviour-preserving security fixes for Python code inside PatchProof.
+FIX_SYSTEM = """You write minimal, behaviour-preserving security fixes for source code (Python, JavaScript/TypeScript, PHP, Java, Go, Ruby, C# and others) inside PatchProof.
 
-You get one file with line numbers, one weakness, and the exact region you may change: one whole function, or a few top-level statements.
+You get one file with line numbers, one weakness, and the exact region you may change: one whole function, a few top-level statements, or the flagged lines of a non-Python file.
 
 - Fix the root cause with the standard defence for this weakness: bound query parameters, argument lists without a shell, allow-lists and path containment, output escaping, ownership and authorisation checks, safe loaders, secrets read from the environment, signature-checked tokens.
 - Return the complete new source of the region as plain code (no markdown fences) and nothing else. Keep the comments and style that still apply.
-- For a function: its def line and existing decorators are kept from the original no matter what you write, so fix the weakness inside the body. You may add a decorator (for example an access check the app already has). Keep what it returns compatible, so every caller still works.
+- For a flagged line range in a non-Python file: return replacement code for exactly those lines, in the file's own style, with brackets and quotes balanced so the file still parses, and with the indentation of the first original line. Don't touch other lines.
+- For a Python function: its def line and existing decorators are kept from the original no matter what you write, so fix the weakness inside the body. You may add a decorator (for example an access check the app already has). Keep what it returns compatible, so every caller still works.
 - Legitimate input must behave exactly as before. Only the malicious cases may be refused or neutralised.
-- Use the standard library and modules the file already imports. Put any new import statements in new_imports (they go at the top of the file), not inside the region.
+- Use the standard library and libraries the file or project already uses. Put any new import/require/use statements in new_imports (they go at the top of the file), not inside the region.
 - No unrelated refactors, renames or logging. One short comment starting with "PatchProof:" above the key change is welcome.
 - rationale: what the fix does and why it stops the attack, in two sentences. behaviour_change: anything a legitimate caller would notice, or "None"."""
 
@@ -424,15 +429,25 @@ def propose_fix(source: str, vuln: Vuln, profile: dict) -> dict:
     """Ask the model for a fix and keep it only if it passes every static check.
 
     Returns {"after", "rationale", "behaviour_change", "checks", "log", "reason"}; "after" is None when no attempt passed.
+    Python fixes replace a whole function body (or top-level statements); other languages replace the flagged lines.
     """
+    python = is_python(vuln["file_path"])
+    lang = language_of(vuln["file_path"]) or "text"
+    fence = "python" if python else lang
     lo, hi = locate(source, vuln)
-    region = region_for(ast.parse(source), lo, hi)
     lines = source.splitlines()
-    region_src = "\n".join(lines[region.lo - 1 : region.hi])
-    kind = (f"Rewrite the whole function {region.qualname} (lines {region.lo}-{region.hi})" if region.qualname
-            else f"Rewrite the top-level statements on lines {region.lo}-{region.hi}")
-    task = f"{_finding_text(vuln, lo, hi)}\n\n{kind}. Current source of the region:\n```python\n{region_src}\n```"
-    out: list[LogLine] = [log("INFO", f"Asking {name()} to fix {region.where}")]
+    if python:
+        region = region_for(ast.parse(source), lo, hi)
+        r_lo, r_hi, qualname, where = region.lo, region.hi, region.qualname, region.where
+        kind = (f"Rewrite the whole function {region.qualname} (lines {r_lo}-{r_hi})" if qualname
+                else f"Rewrite the top-level statements on lines {r_lo}-{r_hi}")
+    else:
+        r_lo, r_hi, qualname = lo, hi, None
+        where = f"{LANG_LABEL.get(lang, lang)} lines {lo}-{hi} of {vuln['file_path']}"
+        kind = f"Replace exactly lines {lo}-{hi} of this {LANG_LABEL.get(lang, lang)} file"
+    region_src = "\n".join(lines[r_lo - 1 : r_hi])
+    task = f"{_finding_text(vuln, lo, hi)}\n\n{kind}. Current source of the region:\n```{fence}\n{region_src}\n```"
+    out: list[LogLine] = [log("INFO", f"Asking {name()} to fix {where}")]
     feedback, last_checks = "", []
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -442,9 +457,10 @@ def propose_fix(source: str, vuln: Vuln, profile: dict) -> dict:
             out.append(log("ERROR", f"Attempt {attempt}: {e}"))
             return {"after": None, "rationale": None, "behaviour_change": None, "checks": last_checks, "log": out, "reason": str(e)}
         replacement = str(data.get("replacement", ""))
+        imports = [str(i) for i in data.get("new_imports", [])]
         try:
-            after = replace_region(source, region.qualname, region.lo, region.hi, replacement,
-                                   [str(i) for i in data.get("new_imports", [])])
+            after = (replace_region(source, qualname, r_lo, r_hi, replacement, imports) if python
+                     else replace_lines(source, r_lo, r_hi, replacement, imports))
         except (PatchError, cst.ParserSyntaxError, SyntaxError) as e:
             reason = f"it could not be applied: {e}"
             out.append(log("WARN", f"Attempt {attempt} rejected: {reason}"))
@@ -461,7 +477,7 @@ def propose_fix(source: str, vuln: Vuln, profile: dict) -> dict:
         last_checks = checks
         reasons = "\n".join(f"- {c['label']}: {c['detail']}" for c in bad)
         out.append(log("WARN", f"Attempt {attempt} rejected by the checks: " + "; ".join(c["label"] for c in bad)))
-        feedback = (f"\n\nYour previous replacement:\n```python\n{replacement}\n```\n"
+        feedback = (f"\n\nYour previous replacement:\n```{fence}\n{replacement}\n```\n"
                     f"PatchProof's checks rejected it:\n{reasons}\nReturn a corrected replacement.")
     return {"after": None, "rationale": None, "behaviour_change": None, "checks": last_checks, "log": out,
             "reason": f"none of {name()}'s {MAX_ATTEMPTS} attempts passed the checks"}
@@ -469,7 +485,7 @@ def propose_fix(source: str, vuln: Vuln, profile: dict) -> dict:
 
 # ---------- re-check of AI-found weaknesses ----------
 
-RECHECK_SYSTEM = """You verify security fixes inside PatchProof. You get a weakness that was reported in a Python file, and the file after a fix was applied. Decide whether the weakness is now resolved in the patched code: the attack described can no longer succeed. Be strict: a partial fix, or a fix that only covers some inputs, is not resolved. Answer in at most three sentences."""
+RECHECK_SYSTEM = """You verify security fixes inside PatchProof. You get a weakness that was reported in a source file, and the file after a fix was applied. Decide whether the weakness is now resolved in the patched code: the attack described can no longer succeed. Be strict: a partial fix, or a fix that only covers some inputs, is not resolved. Answer in at most three sentences."""
 
 RECHECK_SCHEMA = {
     "type": "object",
@@ -482,10 +498,14 @@ RECHECK_SCHEMA = {
 def recheck(after: str, vuln: Vuln) -> dict:
     """{"resolved": bool, "reasoning": str}. Fails closed: if the model can't be asked, the weakness counts as unresolved."""
     base = vuln.get("base_code") or after
-    region = region_for(ast.parse(base), *locate(base, vuln))
-    fn = functions(ast.parse(after)).get(region.qualname or "")
-    focus = fn.lineno if fn else region.lo
-    where = f"Look at {region.where}, around line {focus} of the patched file."
+    if is_python(vuln["file_path"]):
+        region = region_for(ast.parse(base), *locate(base, vuln))
+        fn = functions(ast.parse(after)).get(region.qualname or "")
+        focus = fn.lineno if fn else region.lo
+        where = f"Look at {region.where}, around line {focus} of the patched file."
+    else:
+        focus = locate(base, vuln)[0]
+        where = f"Look at the code around line {focus} of the patched file."
     try:
         data = _ask("recheck", RECHECK_SYSTEM, [_file_block(vuln["file_path"], after, focus),
                                                 _text(f"{_finding_text(vuln, vuln['line_number'], vuln['end_line'])}\n\n{where}")],
@@ -497,7 +517,7 @@ def recheck(after: str, vuln: Vuln) -> dict:
 
 # ---------- deep scan ----------
 
-DEEP_SYSTEM = """You are PatchProof's deep-scan reviewer. Rule-based scanning has already run on this Python file and its findings are listed. Find additional security weaknesses that pattern rules miss, especially:
+DEEP_SYSTEM = """You are PatchProof's deep-scan reviewer. You get several source files from one project (any language: Python, JavaScript/TypeScript, PHP, Java, Go, Ruby, C#, HTML templates and more). Rule-based scanning has already run and its findings are listed per file. Find additional security weaknesses that pattern rules miss, especially:
 - broken access control: records read or changed by an id without checking that the caller owns them
 - missing authentication or authorisation on sensitive routes or functions
 - business-logic flaws: unchecked or negative amounts, skipped state checks, race conditions
@@ -509,7 +529,8 @@ Rules:
 - Report only weaknesses with concrete evidence in the code shown. No style issues, best-practice advice or duplicates of the listed findings.
 - line_start and line_end are the exact lines of the weak code. evidence_line is the single most important line, copied character for character without the line-number prefix.
 - rationale: who can exploit it, how, and what they gain, in at most three sentences.
-- At most 8 findings, most severe first. Return an empty list if nothing is solid."""
+- "file" is the path exactly as shown in that file's "File:" header.
+- At most 15 findings across all files, most severe first. Return an empty list if nothing is solid."""
 
 DEEP_SCHEMA = {
     "type": "object",
@@ -519,6 +540,7 @@ DEEP_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
+                    "file": {"type": "string"},
                     "type": {"type": "string", "enum": [*DEEP_TYPES, *GENERIC_TYPES]},
                     "severity": {"type": "string", "enum": SEVERITIES},
                     "cwe": {"type": "string"},
@@ -528,7 +550,7 @@ DEEP_SCHEMA = {
                     "evidence_line": {"type": "string"},
                     "rationale": {"type": "string"},
                 },
-                "required": ["type", "severity", "cwe", "title", "line_start", "line_end", "evidence_line", "rationale"],
+                "required": ["file", "type", "severity", "cwe", "title", "line_start", "line_end", "evidence_line", "rationale"],
                 "additionalProperties": False,
             },
         }
@@ -562,66 +584,89 @@ def ground(lines: list[str], item: dict, window: tuple[int, int]) -> tuple[int, 
 
 
 def _deep_files(profile: dict, root: Path) -> list[tuple[str, tuple[int, int] | None]]:
-    from engine.scanner import _is_test_file
-
-    files = [(rel, w) for rel, w in in_scope_files(profile, root) if (root / rel).is_file() and not _is_test_file(rel)]
-    if len(files) <= DEEP_SCAN_MAX_FILES:
-        return files
+    """Every in-scope source file worth reading, most likely entry points (routes, handlers) first."""
+    files = [(rel, w) for rel, w in in_scope_files(profile, root)
+             if language_of(rel) and (root / rel).is_file() and not is_test_file(rel)]
 
     def score(item):
         text = (root / item[0]).read_text(errors="replace")
-        return bool(WEB_HINT.search(text)), len(text)
+        return -int(bool(WEB_HINT.search(text))), len(text)
 
-    return sorted(files, key=score, reverse=True)[:DEEP_SCAN_MAX_FILES]
+    return sorted(files, key=score)
 
 
 def _overlaps(a: tuple[int, int], b: tuple[int, int], slack: int = 2) -> bool:
     return a[0] <= b[1] + slack and b[0] <= a[1] + slack
 
 
-def deep_scan(workspace: str, profile: dict, known: list[dict]) -> dict:
-    """The model reads each in-scope file for weaknesses the rules can't see.
+def _batches(files: list[tuple[str, tuple[int, int] | None]], root: Path) -> list[list[tuple[str, str, tuple[int, int] | None]]]:
+    """Group files so each request carries about DEEP_SCAN_BATCH_CHARS of source: a repo of small files costs a few
+    requests, not one per file."""
+    out: list[list[tuple[str, str, tuple[int, int] | None]]] = []
+    current: list[tuple[str, str, tuple[int, int] | None]] = []
+    size = 0
+    for rel, window in files:
+        source = (root / rel).read_text(errors="replace")
+        if current and size + len(source) > DEEP_SCAN_BATCH_CHARS:
+            out.append(current)
+            current, size = [], 0
+        current.append((rel, source, window))
+        size += min(len(source), DEEP_SCAN_BATCH_CHARS)
+    if current:
+        out.append(current)
+    return out
 
-    Returns {"findings", "files", "dropped", "errors"}: findings that quote real code and are not duplicates,
-    how many files were read, how many answers were dropped for not matching the code, and per-file errors.
+
+def deep_scan(workspace: str, profile: dict, known: list[dict]) -> dict:
+    """The model reads every in-scope source file (in any language) for weaknesses the rules can't see.
+
+    Returns {"findings", "files", "dropped", "errors", "unread", "requests", "model"}: findings that quote real code and
+    are not duplicates, how many files were read, how many answers were dropped for not matching the code, errors per
+    request, any files beyond the per-scan request cap, and how many requests were made.
     """
     root = Path(workspace)
-    files = _deep_files(profile, root)
+    batches = _batches(_deep_files(profile, root), root)
+    read, unread = batches[:DEEP_SCAN_MAX_REQUESTS], [rel for b in batches[DEEP_SCAN_MAX_REQUESTS:] for rel, _, _ in b]
 
-    def one(item: tuple[str, tuple[int, int] | None]):
-        rel, window = item
-        source = (root / rel).read_text(errors="replace")
-        mine = [k for k in known if k["file_path"] == rel]
-        listed = "\n".join(f"- {k['type']} at lines {k['line_number']}-{k['end_line']}: {k['title']}" for k in mine) or "- none"
+    def one(batch: list[tuple[str, str, tuple[int, int] | None]]):
+        names = {rel for rel, _, _ in batch}
+        listed = "\n".join(
+            f"- {k['file_path']}: {k['type']} at lines {k['line_number']}-{k['end_line']}: {k['title']}"
+            for k in known if k["file_path"] in names) or "- none"
+        text = "\n\n".join(_file_block(rel, source, window=window)["text"] for rel, source, window in batch)
+        blocks = [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}},
+                  _text(f"Already reported (don't repeat these):\n{listed}")]
         try:
-            data = _ask("deep_scan", DEEP_SYSTEM, [_file_block(rel, source, window=window),
-                                                   _text(f"Already reported for this file (don't repeat these):\n{listed}")],
-                        DEEP_SCHEMA, "high")
+            return batch, _ask("deep_scan", DEEP_SYSTEM, blocks, DEEP_SCHEMA, "high"), None
         except AIError as e:
-            return rel, source, window, None, str(e)
-        return rel, source, window, data, None
+            return batch, None, str(e)
 
     with ThreadPoolExecutor(WORKERS) as pool:
-        results = list(pool.map(one, files))
+        results = list(pool.map(one, read))
 
     findings: list[Finding] = []
     dropped = 0
     errors: list[str] = []
     seen: set[str] = set()
-    used = [data["_model"] for _, _, _, data, _ in results if data and data.get("_model")]
-    for rel, source, window, data, error in results:
+    used = [data["_model"] for _, data, _ in results if data and data.get("_model")]
+    for batch, data, error in results:
         if error:
-            errors.append(f"{rel}: {error}")
+            errors.append(f"{batch[0][0]}{f' and {len(batch) - 1} more' if len(batch) > 1 else ''}: {error}")
             continue
-        lines = source.splitlines()
-        span_window = window or (1, len(lines))
+        by_file = {rel: (source.splitlines(), window) for rel, source, window in batch}
         for item in (data.get("findings") or [])[:DEEP_SCAN_MAX_FINDINGS]:
-            vtype = item.get("type")
-            span = ground(lines, item, span_window) if vtype in DEEP_TYPES or vtype in GENERIC_TYPES else None
+            vtype, rel = item.get("type"), str(item.get("file", ""))
+            if len(batch) == 1 and rel not in by_file:
+                rel = batch[0][0]  # a single-file request can only mean that file
+            if rel not in by_file or not (vtype in DEEP_TYPES or vtype in GENERIC_TYPES):
+                dropped += 1
+                continue
+            lines, window = by_file[rel]
+            span = ground(lines, item, window or (1, len(lines)))
             if span is None:
                 dropped += 1
                 continue
-            anchor = "ai|" + " ".join(str(item["evidence_line"]).split())
+            anchor = f"ai|{rel}|" + " ".join(str(item["evidence_line"]).split()) if len(by_file) > 1 else "ai|" + " ".join(str(item["evidence_line"]).split())
             duplicate = anchor in seen or any(
                 k["file_path"] == rel and k["type"] == vtype and _overlaps(span, (k["line_number"], k["end_line"])) for k in known)
             if duplicate:
@@ -644,5 +689,5 @@ def deep_scan(workspace: str, profile: dict, known: list[dict]) -> dict:
                 "detected_by": "ai",
                 "anchor": anchor,
             })
-    return {"findings": findings, "files": len(files), "dropped": dropped, "errors": errors,
-            "model": max(set(used), key=used.count) if used else model()}
+    return {"findings": findings, "files": sum(len(b) for b in read), "dropped": dropped, "errors": errors,
+            "unread": unread, "requests": len(read), "model": max(set(used), key=used.count) if used else model()}

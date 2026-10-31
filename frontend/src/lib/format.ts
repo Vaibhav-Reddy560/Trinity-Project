@@ -30,6 +30,20 @@ export const typeName: Record<VulnType, string> = {
   OTHER_WEAKNESS: 'Other weakness',
 }
 
+const LANGUAGE: Record<string, string> = {
+  python: 'Python', javascript: 'JavaScript/TypeScript', php: 'PHP', java: 'Java/Kotlin', go: 'Go', ruby: 'Ruby',
+  csharp: 'C#', html: 'HTML', rust: 'Rust', c: 'C/C++', shell: 'Shell',
+}
+
+/** "34 files read: 15 HTML, 14 Python, 4 JavaScript/TypeScript, 1 Shell". */
+export function filesRead(stats: { files_scanned: number; by_language?: Record<string, number> } | null | undefined): string {
+  if (!stats) return ''
+  const parts = Object.entries(stats.by_language ?? {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([lang, n]) => `${n} ${LANGUAGE[lang] ?? lang}`)
+  return `${stats.files_scanned} file${stats.files_scanned === 1 ? '' : 's'} read${parts.length ? `: ${parts.join(', ')}` : ''}.`
+}
+
 export const fixSourceLabel = { rule: 'Rule-based patch', ai: 'Written by AI, checked by PatchProof' } as const
 
 /** Short model name for display: "claude-opus-5-5" -> "Claude Opus 5.5", "gemini-2.5-flash" -> "Gemini 2.5 Flash". */

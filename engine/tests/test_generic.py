@@ -195,4 +195,4 @@ def test_project_scan_skips_dependencies_and_bad_files(tmp_path: Path):
     stats: dict = {}
     findings = scan_repository(str(tmp_path), project_profile(tmp_path, "p", "local"), stats)
     assert findings == []
-    assert stats == {"files_scanned": 1, "files_skipped": 0, "parse_errors": 1}
+    assert stats == {"files_scanned": 1, "files_skipped": 0, "parse_errors": 1, "by_language": {"python": 1}}

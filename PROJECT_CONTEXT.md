@@ -5,7 +5,7 @@
 ## 1. Summary
 PatchProof is an automated AppSec remediation engine. It **scans** Python code for security weaknesses, **proves** each finding by running an isolated proof-of-concept where the target allows it, **patches** the code with syntax-preserving LibCST transforms (or, when no rule covers the code, with a fix written by Claude), and **verifies** every fix. Accuracy and verifiable evidence matter more than model complexity: nothing counts as fixed until it passes the proof checks in §4.
 
-It is not tied to one app (§4). Practice targets get the full find → prove → patch → verify loop, with exploits and a regression suite run against the patched code. Any other local folder or public Git repository is never run: findings are fixed in a copy and proven by static checks. AI assistance (§4, "AI assistance") is optional; with no API key every rule-based feature still works. The main demo target is the AI customer-support module of the deliberately vulnerable `vuln-bank` app.
+It is not tied to one app (§4). Practice targets get the full find → prove → patch → verify loop, with exploits and a regression suite run against the patched code. Any other local folder or public Git repository is never run: findings are fixed in a copy and proven by static checks. AI assistance (§4, "AI assistance") is optional; with no API key every rule-based feature still works. It reads every common language (§4, "Languages"). The main demo target is the whole deliberately vulnerable `vuln-bank` app; its AI customer-support module is also proven by live exploits.
 
 Hackathon track: *Find the Flaw. Prove the Fix.* (AppSec / SAST / secure patching), 24h, 3-person team.
 
@@ -36,10 +36,20 @@ A **target** is the code under test. The backend stores the active one (TinyDB `
 | Kind | Comes from | What PatchProof does |
 |---|---|---|
 | `profile` (practice target) | `target_app/profiles/<id>.json` | Full loop: scan, exploit, patch, verify. Needs a harness and test cases. |
-| `project` | Any absolute local folder, or a public `https://` Git URL (shallow clone into `backend/data/projects/`) | Scans every `.py` file (dependency, virtualenv and build folders skipped). The code is **never imported or run**, so `poc` returns 409. Its Python files are copied to the workspace; fixes go to that copy (your folder is never changed) and are proven by the static checks. `GET /patches` returns them as one diff. |
+| `project` | Any absolute local folder, or a public `https://` Git URL (shallow clone into `backend/data/projects/`) | Scans every source file in a supported language (dependencies, vendored code, build output and minified bundles skipped). The code is **never imported or run**, so `poc` returns 409. Its source files are copied to the workspace; fixes go to that copy (your folder is never changed) and are proven by the static checks. `GET /patches` returns them as one diff. |
 
 Practice targets:
-- **`vuln-bank`** (default): the AI customer-support module of `Commando-X/vuln-bank`, pinned at `4bb7cd5`, snapshot in `target_app/vuln-bank/` (pristine, never edited). Rule packs `ai` + `generic`. Harness `vuln-bank-agent` (`target_app/harness/run_case.py`).
+- **`vuln-bank`** (default): the whole `Commando-X/vuln-bank` app, pinned at `4bb7cd5`, snapshot in `target_app/vuln-bank/` (pristine, never edited). Rule packs `ai` + `generic`. Harness `vuln-bank-agent` (`target_app/harness/run_case.py`), which runs `ai_agent_deepseek.py` only.
+
+**Harness coverage:** a profile's `harness.files` lists the files its cases actually run. Only findings there are `provable`, and only fixes there get exploit and regression runs; fixes elsewhere are proven by the static checks, and the log says so.
+
+### Languages (`engine/languages.py`, `engine/lang_rules.py`)
+| Language | Detection | Rule-based fix | AI fix checks |
+|---|---|---|---|
+| Python | Syntax tree (`ast`) with taint, 16 types | Yes (LibCST) | Full: compiles, fixed, no new, scoped, signature |
+| JavaScript/TypeScript, PHP, Java/Kotlin, Go, Ruby, C#, HTML, shell | Pattern rules per statement (SQL/NoSQL, command and code injection, XSS, path traversal, SSRF, open redirect, deserialization, weak crypto, TLS, JWT, secrets, debug, CSRF, mass assignment) | No | Syntax via `node --check` / `php -l` / `ruby -c` / `bash -n` / `gofmt -e` when installed (else bracket balance), fixed on rescan, no new, only the flagged lines changed |
+
+Skipped: test, spec and fixture files (and their throwaway secrets), PHP outside `<?php ?>`, dependency/vendor/build folders, `*.min.js` and other generated files, debug settings in development/test configs. The AI deep scan reads every in-scope file in any language, batched about 90k characters per request (at most 40 requests per scan; anything beyond is reported as unread).
 - **`notes-api`**: a small deliberately vulnerable notes service in `target_app/fixtures/notes-api/`. Rule pack `generic`. Harness `function-call` (`target_app/harness/run_call.py`). It shows the full loop works beyond vuln-bank.
 
 **Read `target_app/SCOPE.md`.** It has the exact in-scope files and lines, the harness designs, the threat model, and the reference exploit/regression cases for both practice targets.
@@ -262,7 +272,7 @@ verify_fix(workspace: str, vuln: Vuln, profile=None) -> VerifyResult           #
 AI (`engine/ai.py`): `status()`, `review(source, vuln)`, `review_many(items)`, `propose_fix(source, vuln, profile)`, `deep_scan(workspace, profile, known)`, `recheck(after, vuln)`. Each raises or returns `AIError` messages fit for the UI.
 
 `Finding` = the `Vuln` fields minus `id`, `status`, `*_status`, `*_log`, `patched_code`, `diff`, `patch_rationale`, `fix_source`, `checks`, `ai_review`, `behaviour_change`, `base_code` and the timestamps. The backend fills those in.
-- `workspace` is an absolute path to the writable copy (`backend/data/workspace`). For projects it holds only their Python files. The engine never decides paths.
+- `workspace` is an absolute path to the writable copy (`backend/data/workspace`). For projects it holds their source files. The engine never decides paths.
 - PoC and verify cases run the target's harness through `subprocess` with a timeout, in a fresh isolated interpreter (`sys.executable -I`): `target_app/harness/run_case.py` for vuln-bank, `target_app/harness/run_call.py` for function-call targets such as notes-api. Projects have no harness and are never run.
 
 ## 9. Design System (Frontend — mandatory)

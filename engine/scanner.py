@@ -12,11 +12,13 @@ import re
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from engine import ai, generic_rules
+from engine import ai, generic_rules, lang_rules
+from engine.lang_rules import statement_span
 from engine.generic_rules import Hit
+from engine.languages import is_python, is_test_file, language_of
 from engine.models import Finding
 from engine.patcher import can_patch, clear_caches, has_patcher
-from engine.targets import cases_for_profile, in_scope_files, load_profile
+from engine.targets import cases_for_profile, harness_files, in_scope_files, load_profile
 
 MAX_SNIPPET_LINES = 40
 
@@ -222,11 +224,8 @@ def flagged(tree: ast.AST, packs: list[str]) -> list[tuple[str, int, int]]:
     return out
 
 
-def _is_test_file(rel: str) -> bool:
-    parts = rel.split("/")
-    name = parts[-1]
-    return any(p in ("test", "tests") for p in parts[:-1]) or name.startswith("test_") or name.endswith("_test.py") or name == "conftest.py"
-
+_is_test_file = is_test_file  # kept under its old name for callers in this package
+DEV_CONFIG = re.compile(r"(?:^|/)(?:development|dev|test|testing|local)(?:\.[\w.]+)?\.\w+$", re.I)
 
 def scan_repository(repo_path: str, profile: dict | None = None, stats: dict | None = None,
                     ai_fixes: bool | None = None) -> list[Finding]:
@@ -240,52 +239,69 @@ def scan_repository(repo_path: str, profile: dict | None = None, stats: dict | N
     clear_caches()
     ai_on = ai.enabled() if ai_fixes is None else ai_fixes
     provable = {t for c in cases_for_profile(profile) if c["kind"] == "security" for t in c["types"]}
+    exercised = harness_files(profile)
     texts = profile.get("texts", {})
     findings: list[Finding] = []
-    counts = {"files_scanned": 0, "files_skipped": 0, "parse_errors": 0}
+    counts: dict = {"files_scanned": 0, "files_skipped": 0, "parse_errors": 0, "by_language": {}}
 
     for rel, window in in_scope_files(profile, root):
         path = root / rel
-        if not path.is_file():
+        lang = language_of(rel)
+        if not path.is_file() or lang is None:
             continue
+        python = is_python(rel)
         try:
             source = path.read_text(errors="replace")
-            tree = ast.parse(source, filename=rel)
+            tree = ast.parse(source, filename=rel) if python else None
         except (SyntaxError, ValueError):
             counts["parse_errors"] += 1
             continue
         counts["files_scanned"] += 1
+        counts["by_language"][lang] = counts["by_language"].get(lang, 0) + 1
         lines = source.splitlines()
         lo, hi = window or (1, len(lines))
-        if window:
+        if tree is not None and window:
             tree = ast.Module(body=[n for n in tree.body if n.lineno <= hi and (n.end_lineno or n.lineno) >= lo], type_ignores=[])
 
-        for pack in profile["rule_packs"]:
-            for vtype, severity, cwe, hit in PACKS[pack](tree):
-                if hit.start < lo or hit.start > hi:
-                    continue
-                if vtype == "HARDCODED_CREDENTIALS" and _is_test_file(rel):
-                    continue  # test fixtures are full of throwaway credentials
-                end = min(hit.end, hi, hit.start + MAX_SNIPPET_LINES - 1)
-                title, rationale = texts.get(f"{rel}:{vtype}", (hit.title, hit.rationale))
-                code = "\n".join(lines[hit.start - 1 : end])
+        if tree is not None:
+            hits = (h for pack in profile["rule_packs"] for h in PACKS[pack](tree))
+        elif is_test_file(rel):
+            hits = iter(())  # test fixtures, specs and mocks are full of deliberate bad examples
+        else:
+            hits = iter(lang_rules.scan_source(source, lang))
+
+        for vtype, severity, cwe, hit in hits:
+            if hit.start < lo or hit.start > hi:
+                continue
+            if vtype == "HARDCODED_CREDENTIALS" and _is_test_file(rel):
+                continue  # test fixtures are full of throwaway credentials
+            if vtype == "DEBUG_MODE" and DEV_CONFIG.search(rel):
+                continue  # debug settings are expected in development and test configuration
+            if not python:
+                hit = Hit(hit.start, statement_span(lines, hit.start), hit.title, hit.rationale, hit.anchor)
+            end = min(hit.end, hi, hit.start + MAX_SNIPPET_LINES - 1)
+            title, rationale = texts.get(f"{rel}:{vtype}", (hit.title, hit.rationale))
+            code = "\n".join(lines[hit.start - 1 : end])
+            if python:
                 fixer = "rule" if has_patcher(vtype) and can_patch(vtype, source, code, hit.start, root) else "ai" if ai_on else None
-                findings.append({
-                    "file_path": rel,
-                    "line_number": hit.start,
-                    "end_line": end,
-                    "severity": severity,  # type: ignore[typeddict-item]
-                    "type": vtype,  # type: ignore[typeddict-item]
-                    "cwe": cwe,
-                    "title": title,
-                    "severity_rationale": rationale,
-                    "original_code": code,
-                    "patchable": fixer is not None,
-                    "provable": vtype in provable,
-                    "fixer": fixer,  # type: ignore[typeddict-item]
-                    "detected_by": "rule",
-                    "anchor": hit.anchor,
-                })
+            else:
+                fixer = "ai" if ai_on else None  # no rule-based patch outside Python: the AI model writes it, under the checks
+            findings.append({
+                "file_path": rel,
+                "line_number": hit.start,
+                "end_line": end,
+                "severity": severity,  # type: ignore[typeddict-item]
+                "type": vtype,  # type: ignore[typeddict-item]
+                "cwe": cwe,
+                "title": title,
+                "severity_rationale": rationale,
+                "original_code": code,
+                "patchable": fixer is not None,
+                "provable": vtype in provable and python and (exercised is None or rel in exercised),
+                "fixer": fixer,  # type: ignore[typeddict-item]
+                "detected_by": "rule",
+                "anchor": hit.anchor,
+            })
 
     counts["files_skipped"] = 0 if profile["kind"] == "profile" else _skipped(root)
     if stats is not None:
@@ -294,5 +310,5 @@ def scan_repository(repo_path: str, profile: dict | None = None, stats: dict | N
 
 
 def _skipped(root: Path) -> int:
-    from engine.targets import iter_python_files
-    return iter_python_files(root)[1]
+    from engine.targets import iter_source_files
+    return iter_source_files(root)[1]

@@ -22,6 +22,7 @@ from engine.generic_rules import (
 )
 from engine.generic_rules import find as generic_find
 from engine.harness import log
+from engine.languages import is_python
 from engine.models import LogLine, PatchResult, Vuln
 from engine.targets import iter_python_files, load_profile
 
@@ -1044,6 +1045,8 @@ def can_patch(vuln_type: str, source: str, original_code: str, near: int, root: 
 def rule_patch(source: str, vuln: Vuln, root: Path | None = None) -> tuple[str, str] | str:
     """(patched source, rationale) from a rule-based patch, or the reason none applies."""
     vtype = vuln["type"]
+    if not is_python(vuln["file_path"]):
+        return "rule-based patches are written for Python; this file's fix comes from the AI model"
     if vtype in GENERIC_PATCHERS:
         res = _transform_site(vtype, source, vuln["original_code"], vuln["line_number"], root)
         return res or "the flagged code is no longer present, or this form of it can't be rewritten safely by a rule"
@@ -1141,6 +1144,30 @@ def replace_region(source: str, qualname: str | None, lo: int, hi: int, replacem
         body[idx[0] : idx[-1] + 1] = stmts
         module = wrapper.module.with_changes(body=body)
     return add_imports(module, imports).code
+
+
+def replace_lines(source: str, lo: int, hi: int, replacement: str, imports: list[str]) -> str:
+    """Swap lines lo..hi (1-based, inclusive) of a non-Python file for `replacement`, re-indented to the first original
+    line, then add any new import lines after the file's existing ones. Nothing else in the file changes."""
+    from engine.checks import IMPORT_LIKE
+
+    lines = source.split("\n")
+    if not 1 <= lo <= hi <= len(lines):
+        raise PatchError(f"lines {lo}-{hi} are outside the file")
+    body = _normalize(replacement).rstrip("\n").split("\n")
+    if not any(ln.strip() for ln in body):
+        raise PatchError("the replacement is empty")
+    pad = re.match(r"[ \t]*", lines[lo - 1]).group(0)  # type: ignore[union-attr]
+    lines[lo - 1 : hi] = [pad + ln if ln.strip() else ln for ln in body]
+    known = {ln.strip() for ln in lines}
+    add = [i for i in (_normalize(x).strip() for x in imports) if i and i not in known]
+    if add:
+        at = 0
+        for index, line in enumerate(lines[:120]):
+            if IMPORT_LIKE.match(line) and not line.lstrip().startswith("<?php") or (index == 0 and line.startswith(("#!", "<?php"))):
+                at = index + 1
+        lines[at:at] = add
+    return "\n".join(lines)
 
 
 def unified_diff(rel: str, before: str, after: str) -> str:

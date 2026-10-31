@@ -4,7 +4,7 @@ PatchProof ships two **practice targets**, each with a profile in `target_app/pr
 - **vuln-bank** AI customer support (this page, first): the main demo target
 - **notes-api** (end of this page): a second fixture showing that the full loop works beyond vuln-bank
 
-Any other local folder or public Git repository can be scanned as a **project**. Its code is never run. Its Python files are copied to the workspace, fixes are applied to that copy and proven by static checks, and the original folder is never changed. See `PROJECT_CONTEXT.md` §4.
+Any other local folder or public Git repository can be scanned as a **project**. Its code is never run. Its source files (every supported language) are copied to the workspace, fixes are applied to that copy and proven by static checks, and the original folder is never changed. See `PROJECT_CONTEXT.md` §4.
 
 # vuln-bank AI Customer Support
 
@@ -17,10 +17,10 @@ Any other local folder or public Git repository can be scanned as a **project**.
 ## In-scope files
 | File | Lines | Role |
 |---|---|---|
-| `vuln-bank/ai_agent_deepseek.py` | 1-300 (whole file) | **Scan + PoC + auto-patch + verify.** Golden-path target. |
-| `vuln-bank/app.py` | 2328-2476 (`/api/ai/chat`, `/api/ai/chat/anonymous`, `/api/ai/system-info`) | **Scan only.** Shows how user input and `user_context` reach the agent. |
+| Every source file in `vuln-bank/` (Python, JavaScript, HTML templates, shell) | Whole files | **Scan + fix + static proof checks.** 66 findings at `4bb7cd5`, mostly SQL injection, XSS and hardcoded secrets. |
+| `vuln-bank/ai_agent_deepseek.py` | 1-300 (whole file) | **Also PoC + regression suite.** The only file the offline harness runs, so the only one whose fixes are proven by exploits. |
 
-Everything else in the snapshot is out of scope. We don't scan it, patch it, or claim anything about it.
+Out of scope: dependencies. Fixes outside `ai_agent_deepseek.py` are proven by the static checks only, because running the rest of vuln-bank needs its Postgres database.
 
 ## Known weakness sites in `ai_agent_deepseek.py` (@ 4bb7cd5)
 | Type | Where | Why |

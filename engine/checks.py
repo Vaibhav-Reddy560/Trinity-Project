@@ -11,9 +11,18 @@ Practice targets add exploit and regression runs on top (verifier.py).
 
 import ast
 import copy
+import difflib
+import functools
+import re
+import shutil
+import subprocess
+import tempfile
 from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 
+from engine import lang_rules
+from engine.languages import is_python, language_of
 from engine.models import Check
 
 LABELS = {
@@ -114,11 +123,24 @@ def _scope_of(tree: ast.Module):
 
 def _flagged(tree: ast.Module, source: str, packs: list[str]) -> list[tuple[str, str, str]]:
     """(type, scope, code) of every rule hit."""
+    return list(_flagged_cached(source, tuple(packs)))
+
+
+@functools.lru_cache(maxsize=64)
+def _flagged_cached(source: str, packs: tuple[str, ...]) -> tuple[tuple[str, str, str], ...]:
+    """Rescans are deterministic, so they are cached by file content: verify reuses the scans made when the patch was
+    checked, and one fix's "after" is the next fix's "before" in the same file."""
     from engine.scanner import flagged
 
+    tree = _parse(source)
     lines = source.splitlines()
     scope = _scope_of(tree)
-    return [(t, scope(s), "\n".join(lines[s - 1 : e]).strip()) for t, s, e in flagged(tree, packs)]
+    return tuple((t, scope(s), "\n".join(lines[s - 1 : e]).strip()) for t, s, e in flagged(tree, list(packs)))
+
+
+@functools.lru_cache(maxsize=64)
+def _parse(source: str) -> ast.Module:
+    return ast.parse(source)  # callers never mutate it: _skeleton works on a deep copy
 
 
 def _allowed_addition(stmt: ast.stmt) -> bool:
@@ -194,13 +216,104 @@ def _signature(t0: ast.Module, t1: ast.Module, qualname: str) -> Check:
     return check("signature", True, f"{qualname}() keeps its name, parameters and decorators, so callers keep working.{extra}")
 
 
+# ---------- other languages: no syntax tree, so the checks work on text ----------
+
+IMPORT_LIKE = re.compile(
+    r"^\s*(?:import\b|from\s+\S+\s+import\b|(?:const|let|var)\s+[\w{}\s,*]+\s*=\s*require\s*\(|require(?:_once)?\b|include(?:_once)?\b|"
+    r"use\s+[\w\\]+|using\s+[\w.]+;|#include\b|package\b|@?require\b|<\?php|require_relative\b|load\b)")
+SYNTAX_TOOLS = {"javascript": ({".js", ".mjs", ".cjs"}, ["node", "--check"]), "php": ({".php"}, ["php", "-l"]),
+                "ruby": ({".rb"}, ["ruby", "-c"]), "shell": ({".sh", ".bash"}, ["bash", "-n"]), "go": ({".go"}, ["gofmt", "-e"])}
+
+
+def _balance(text: str) -> tuple[int, int, int]:
+    text = re.sub(r"\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'|`(?:\\.|[^`\\])*`", "", text, flags=re.S)
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    text = re.sub(r"(?m)(?:^|\s)(?://|#).*$", "", text)
+    return text.count("(") - text.count(")"), text.count("{") - text.count("}"), text.count("[") - text.count("]")
+
+
+def _syntax(after: str, rel: str, lang: str | None) -> tuple[bool | None, str]:
+    """Run the language's own syntax check when it is installed; else compare bracket balance with the original."""
+    suffix = Path(rel).suffix.lower()
+    tool = SYNTAX_TOOLS.get(lang or "")
+    if tool and suffix in tool[0] and shutil.which(tool[1][0]):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / ("check" + suffix)
+            target.write_text(after)
+            try:
+                run = subprocess.run([*tool[1], str(target)], capture_output=True, text=True, timeout=15)
+            except (subprocess.TimeoutExpired, OSError):
+                return None, f"{tool[1][0]} could not be run"
+            if run.returncode == 0 and not (tool[1][0] == "gofmt" and run.stderr.strip()):
+                return True, f"{tool[1][0]} accepts the patched file."
+            return False, (run.stderr.strip() or run.stdout.strip()).splitlines()[0][:200] if (run.stderr or run.stdout).strip() else f"{tool[1][0]} rejected the file."
+    return None, "No syntax checker for this language is installed here, so brackets are compared instead."
+
+
+def _text_hits(source: str, lang: str | None) -> list[tuple[str, str]]:
+    """(type, stripped first line) of every pattern-rule hit in a non-Python file."""
+    if lang is None:
+        return []
+    lines = source.splitlines()
+    return [(t, lines[h.start - 1].strip()) for t, _, _, h in lang_rules.scan_source(source, lang)]
+
+
+def text_checks(before: str, after: str, vuln: dict) -> list[Check]:
+    rel = vuln["file_path"]
+    lang = language_of(rel)
+    out: list[Check] = []
+    ok, how = _syntax(after, rel, lang)
+    delta = tuple(a - b for a, b in zip(_balance(after), _balance(before)))
+    if ok is False:
+        out.append(check("compiles", False, f"Syntax error: {how}"))
+        return out
+    if ok is None and any(delta):
+        out.append(check("compiles", False, f"Brackets no longer balance after the fix (change in (), {{}}, []: {delta}). {how}"))
+        return out
+    out.append(check("compiles", True, how if ok else "Brackets balance exactly as in the original. " + how.split(", so")[0] + "."))
+
+    lo, hi = locate(before, vuln)
+    b_hits, a_hits = _text_hits(before, lang), _text_hits(after, lang)
+    first = vuln["original_code"].strip().splitlines()[0].strip() if vuln["original_code"].strip() else ""
+    if vuln.get("detected_by", "rule") == "rule":
+        n0 = sum(1 for t, _ in b_hits if t == vuln["type"])
+        n1 = sum(1 for t, _ in a_hits if t == vuln["type"])
+        same = any(t == vuln["type"] and line == first for t, line in a_hits)
+        if n1 < n0 and not same:
+            out.append(check("fixed", True, f"Rescanned: the rule no longer flags this code ({n0} hits before, {n1} after in the file)."))
+        else:
+            out.append(check("fixed", False, "Rescanned: the rule still flags this code."))
+    else:
+        out.append(check("fixed", None, "Found by the AI deep scan, so no rule can re-check it. The model re-checks it at verification."))
+    new = Counter(t for t, _ in a_hits) - Counter(t for t, _ in b_hits)
+    out.append(check("no_new", not new, f"Newly flagged after the fix: {', '.join(new)}." if new else
+                     f"Rescanned the whole file: nothing new is flagged ({len(a_hits)} findings remain, all pre-existing)." if a_hits else
+                     "Rescanned the whole file: nothing is flagged."))
+
+    bl, al = before.splitlines(), after.splitlines()
+    stray = None
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, bl, al, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        inside = lo - 1 <= i1 and i2 <= hi
+        imports = tag == "insert" and all(IMPORT_LIKE.match(x) for x in al[j1:j2])
+        if not (inside or imports or (tag == "insert" and lo - 1 <= i1 <= hi)):
+            stray = i1 + 1
+            break
+    out.append(check("scoped", stray is None,
+                     f"Only lines {lo}-{hi} changed, plus new imports." if stray is None else f"Code outside lines {lo}-{hi} changed near line {stray}."))
+    return out
+
+
 def static_checks(before: str, after: str, vuln: dict, packs: list[str]) -> list[Check]:
+    if not is_python(vuln["file_path"]):
+        return text_checks(before, after, vuln)
     try:
         compile(after, vuln["file_path"], "exec")
     except SyntaxError as e:
         return [check("compiles", False, f"Line {e.lineno}: {e.msg}.")]
     out = [check("compiles", True, "The patched file parses and compiles.")]
-    t0, t1 = ast.parse(before), ast.parse(after)
+    t0, t1 = _parse(before), _parse(after)
     region = region_for(t0, *locate(before, vuln))
     h0, h1 = _flagged(t0, before, packs), _flagged(t1, after, packs)
 
